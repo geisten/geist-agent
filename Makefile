@@ -80,6 +80,7 @@ SPG_SOURCES := \
     src/journal/journal.c \
     src/memory/memory.c \
     src/model/model_adapter.c \
+    src/model/model_resolve.c \
     src/policy/policy.c \
     src/policy/policy_config.c \
     src/policy/policy_gate.c \
