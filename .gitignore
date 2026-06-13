@@ -1,0 +1,62 @@
+# Build outputs from new make-based build system (Phase A).
+# Per-target, per-mode segregated.
+build/
+lib/
+bin/
+deps/geist/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local OS/editor/agent state
+.DS_Store
+.clangd
+.claude/
+
+# Binaries im Root (vom Makefile gebaut)
+eval_geist
+profile_decode
+dump_llamacpp_logits
+bench_sgemv
+/test_*
+
+# Local model and conversion artifacts. These are large, reproducible, or
+# machine-specific and should not enter git.
+gemma-4-E2B-it/
+gguf_artifacts/
+dumps/
+*.safetensors
+
+# Local benchmark scratch. Curated benchmark records can still be force-added
+# explicitly when they are part of a documented result.
+bench_runs/perf_sweep/
+bench_runs/ppl/
+bench_runs/quality_perf/
+bench_runs/*_eval*.json
+bench_runs/bitnet_smoke*.json
+bench_runs/*profile*.jsonl
+bench_runs/*profile*.stderr
+bench_runs/*decode_baseline*
+bench_runs/*decode_optimized*
+bench_runs/geist_gemma4_e2b_q4_k_m_stream4_cpu4_20260604.jsonl
+bench_runs/geist_vs_llamacpp_*_20260603*
+bench_runs/geist_vs_llamacpp_*_20260604*
+bench_runs/llamacpp_*_20260604.json
+bench_runs/step*_*.jsonl
+bench_runs/step*_*.md
+bench_runs/post_fixes_ptqtp_vs_q4k_mac.md
+
+# Generated local benchmark/dump folders outside bench_runs.
+benchmark_runs/kivi_post_v_only_20260513/
+greedy_T2.json
+
+# Experimental SSM/Mamba local artifacts. Source files in this tree remain
+# visible; generated runs, model binaries, local assets, and tool venvs do not.
+experimental/ssm_mamba/benchmark_runs/
+experimental/ssm_mamba/assets/
+experimental/ssm_mamba/models/
+experimental/ssm_mamba/tools/venv/
+experimental/ssm_mamba/tokens_ref*.txt
+experimental/ssm_mamba/shaders/*.spv

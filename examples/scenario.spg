@@ -1,0 +1,8 @@
+(scenario
+ (host (id web) (criticality_bp 8000))
+ (host (id db) (criticality_bp 10000))
+ (service (id ssh_web) (host web) (name ssh) (port 22) (exposure_bp 5000))
+ (account (id root_web) (host web) (username root) (enabled true))
+ (credential (id key_root_web) (account root_web) (strength_bp 3000))
+ (vulnerability (id cve_demo) (service ssh_web) (severity_bp 8000) (patched false))
+ (network_edge (from web) (to db) (reachability_bp 5000)))
