@@ -428,12 +428,23 @@ int main(int argc, char **argv) {
                 (void)spg_mem_index(&mem, sizeof idx, idx, nullptr, &tr);
                 (void)snprintf(
                     composed, sizeof composed,
-                    "[tools] To use memory, reply with exactly one "
-                    "s-expression and nothing else: (tool memory_list) | "
-                    "(tool memory_read (slug \"...\")) | (tool memory_save "
-                    "(slug \"...\") (description \"...\") (body \"...\")) | "
-                    "(tool memory_delete (slug \"...\")). The result returns "
-                    "as [tool_result]; then answer the user normally.\n"
+                    "[tools] You have long-term memory. To use it, reply with "
+                    "EXACTLY one s-expression and nothing else:\n"
+                    "  (tool memory_list)\n"
+                    "  (tool memory_read (slug \"<slug>\"))\n"
+                    "  (tool memory_save (slug \"<slug>\") (description "
+                    "\"<one line>\") (body \"<text>\"))\n"
+                    "  (tool memory_delete (slug \"<slug>\"))\n"
+                    "When the user asks about anything that might be stored "
+                    "(see the index below), do NOT guess: first emit a "
+                    "(tool memory_read ...) for the matching slug. The answer "
+                    "returns as [tool_result]; then reply to the user using "
+                    "it.\n"
+                    "Example:\n"
+                    "user: when is standup?\n"
+                    "model: (tool memory_read (slug \"standup\"))\n"
+                    "[tool_result]\nStandup is 9:30 daily.\n"
+                    "model: Standup is at 9:30 every day.\n"
                     "[memory index]\n%s[/memory index]\n\n",
                     idx);
                 index_injected = true;
