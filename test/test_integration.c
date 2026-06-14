@@ -127,6 +127,36 @@ static int test_memory_save_needs_fields(void) {
     return rec.state == SPG_RECOMMENDATION_VALID ? 1 : 0;
 }
 
+static int test_memory_delete_read_parsed(void) {
+    /* delete/read need only a slug (no description/body). */
+    const char del[] =
+        "(recommend (kind memory_delete) (capability \"m\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"r\") "
+        "(slug \"k\"))";
+    const char rd[] =
+        "(recommend (kind memory_read) (capability \"m\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"r\") "
+        "(slug \"k\"))";
+    struct spg_recommendation a = {};
+    struct spg_recommendation b = {};
+    if (parse_rec(del, &a) != SPG_OK || a.state != SPG_RECOMMENDATION_VALID ||
+        a.action_kind != SPG_ACTION_MEMORY_DELETE || !a.has_slug || a.has_body) {
+        return 1;
+    }
+    if (parse_rec(rd, &b) != SPG_OK || b.state != SPG_RECOMMENDATION_VALID ||
+        b.action_kind != SPG_ACTION_MEMORY_READ || !b.has_slug) {
+        return 1;
+    }
+    /* A delete carrying a body is not valid. */
+    const char bad[] =
+        "(recommend (kind memory_delete) (capability \"m\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"r\") "
+        "(slug \"k\") (body \"x\"))";
+    struct spg_recommendation c = {};
+    (void)parse_rec(bad, &c);
+    return c.state == SPG_RECOMMENDATION_VALID ? 1 : 0;
+}
+
 static int test_garbage_rejected(void) {
     const char text[] = "(recommend (kind not_a_kind) (capability \"x\"))";
     struct spg_recommendation rec = {};
@@ -158,6 +188,10 @@ int main(void) {
     }
     if (test_memory_save_needs_fields() != 0) {
         fprintf(stderr, "test_memory_save_needs_fields failed\n");
+        return 1;
+    }
+    if (test_memory_delete_read_parsed() != 0) {
+        fprintf(stderr, "test_memory_delete_read_parsed failed\n");
         return 1;
     }
     if (test_garbage_rejected() != 0) {

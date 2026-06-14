@@ -590,6 +590,10 @@ static const char *action_kind_name(const enum spg_action_kind kind) {
         return "simulator";
     case SPG_ACTION_MEMORY_SAVE:
         return "memory_save";
+    case SPG_ACTION_MEMORY_DELETE:
+        return "memory_delete";
+    case SPG_ACTION_MEMORY_READ:
+        return "memory_read";
     }
     return "unknown";
 }
@@ -1458,6 +1462,7 @@ static int run_loop(const char *run_path, const char *fake_output,
     struct spg_sexpr_node rec_nodes[CLI_NODE_CAPACITY];
     char policy_payload[CLI_PAYLOAD_BYTES];
     char sim_payload[CLI_PAYLOAD_BYTES];
+    char mem_recall_buf[8192] = {0};
 
     const struct spg_orchestrator_workspace workspace = {
         .actor = {
@@ -1480,6 +1485,8 @@ static int run_loop(const char *run_path, const char *fake_output,
         .policy_payload                = policy_payload,
         .sim_payload_capacity          = sizeof sim_payload,
         .sim_payload                   = sim_payload,
+        .memory_recall_capacity        = sizeof mem_recall_buf,
+        .memory_recall_buf             = mem_recall_buf,
     };
 
     struct spg_policy_usage usage = {};
@@ -1501,6 +1508,7 @@ static int run_loop(const char *run_path, const char *fake_output,
         .memory_text_n = 0u,
         .memory_text   = nullptr,
         .memory_index  = have_store ? mem_index_buf : nullptr,
+        .memory_recall = have_store ? mem_recall_buf : nullptr,
     };
 
     uint64_t parent_sequence = 0u;

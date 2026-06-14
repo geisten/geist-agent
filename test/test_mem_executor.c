@@ -28,6 +28,8 @@ static enum spg_status parse_rec(const char *text,
                                     nodes, out, &err);
 }
 
+static char g_recall[4096];
+
 static enum spg_status run_step(const char *text, const char *slug_in,
                                 enum spg_policy_decision_kind dkind,
                                 struct spg_mem_store        *store,
@@ -35,15 +37,19 @@ static enum spg_status run_step(const char *text, const char *slug_in,
     (void)slug_in;
     struct spg_recommendation rec = {};
     if (parse_rec(text, &rec) != SPG_OK ||
-        rec.state != SPG_RECOMMENDATION_VALID ||
-        rec.action_kind != SPG_ACTION_MEMORY_SAVE) {
+        rec.state != SPG_RECOMMENDATION_VALID) {
         return SPG_E_INTERNAL;
     }
     struct spg_mem_executor_state state = {.store = store, .journal = nullptr};
     const struct spg_mem_executor_config cfg = {.write_journal = false};
     char                                 payload[512];
-    const struct spg_mem_executor_workspace ws = {.payload_capacity = sizeof payload,
-                                                  .payload          = payload};
+    g_recall[0] = '\0';
+    const struct spg_mem_executor_workspace ws = {
+        .payload_capacity = sizeof payload,
+        .payload          = payload,
+        .recall_capacity  = sizeof g_recall,
+        .recall           = g_recall,
+    };
     const struct spg_policy_decision decision = {.kind = dkind};
     return spg_mem_executor_step(&state, &cfg, strlen(text), text, &rec,
                                  &decision, &ws, result);
@@ -121,6 +127,55 @@ static int test_deny_rejected(void) {
                : 1;
 }
 
+static int test_delete_removes(void) {
+    struct spg_mem_store store;
+    char                 dir[64];
+    if (open_temp_store(&store, dir) != 0) {
+        return 1;
+    }
+    if (spg_mem_save(&store, "gone", "d", "b") != SPG_OK) {
+        return 1;
+    }
+    const char text[] =
+        "(recommend (kind memory_delete) (capability \"mem.write\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"r\") "
+        "(slug \"gone\"))";
+    struct spg_mem_executor_result res = {};
+    if (run_step(text, "gone", SPG_POLICY_DECISION_ALLOW, &store, &res) !=
+        SPG_OK) {
+        return 1;
+    }
+    char out[64];
+    return (res.saved && spg_mem_read(&store, "gone", sizeof out, out,
+                                      nullptr) == SPG_E_NOT_FOUND)
+               ? 0
+               : 1;
+}
+
+static int test_read_recalls(void) {
+    struct spg_mem_store store;
+    char                 dir[64];
+    if (open_temp_store(&store, dir) != 0) {
+        return 1;
+    }
+    if (spg_mem_save(&store, "k", "d", "remembered text") != SPG_OK) {
+        return 1;
+    }
+    const char text[] =
+        "(recommend (kind memory_read) (capability \"mem.write\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"r\") "
+        "(slug \"k\"))";
+    struct spg_mem_executor_result res = {};
+    if (run_step(text, "k", SPG_POLICY_DECISION_ALLOW, &store, &res) != SPG_OK) {
+        return 1;
+    }
+    /* The recall buffer holds the file content (body included). */
+    return (res.was_read && res.saved &&
+            strstr(g_recall, "remembered text") != nullptr)
+               ? 0
+               : 1;
+}
+
 int main(void) {
     if (test_save_writes_file() != 0) {
         fprintf(stderr, "test_save_writes_file failed\n");
@@ -132,6 +187,14 @@ int main(void) {
     }
     if (test_deny_rejected() != 0) {
         fprintf(stderr, "test_deny_rejected failed\n");
+        return 1;
+    }
+    if (test_delete_removes() != 0) {
+        fprintf(stderr, "test_delete_removes failed\n");
+        return 1;
+    }
+    if (test_read_recalls() != 0) {
+        fprintf(stderr, "test_read_recalls failed\n");
         return 1;
     }
     return 0;

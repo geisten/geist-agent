@@ -23,34 +23,52 @@ static bool copy_span(size_t text_n, const char *text,
     return true;
 }
 
+static const char *op_name(const enum spg_action_kind kind) {
+    switch (kind) {
+    case SPG_ACTION_MEMORY_DELETE:
+        return "memory_delete";
+    case SPG_ACTION_MEMORY_READ:
+        return "memory_read";
+    case SPG_ACTION_LOCAL_SHELL:
+    case SPG_ACTION_SSH_AUTH_PROBE:
+    case SPG_ACTION_SIMULATOR:
+    case SPG_ACTION_MEMORY_SAVE:
+        break;
+    }
+    return "memory_save";
+}
+
+/* Journal one (memory_<op> (slug ...) [(bytes N)] (status ...)) event. */
 static enum spg_status journal_memory(
     struct spg_mem_executor_state *state,
-    const struct spg_mem_executor_config *config, const char *slug,
-    const char *description, size_t body_n,
+    const struct spg_mem_executor_config *config, const char *op,
+    const char *slug, bool with_bytes, size_t bytes,
     const struct spg_mem_executor_workspace *workspace,
     struct spg_mem_executor_result *result) {
     struct spg_sexpr_writer writer;
     spg_sexpr_writer_init(&writer, workspace->payload_capacity,
                           workspace->payload);
-    enum spg_status s = spg_sexpr_writer_append_text(&writer, "(memory_save");
+    enum spg_status s = spg_sexpr_writer_append_text(&writer, "(");
+    if (s == SPG_OK) {
+        s = spg_sexpr_writer_append_text(&writer, op);
+    }
     if (s == SPG_OK) {
         s = spg_sexpr_writer_append_text(&writer, " (slug ");
     }
     if (s == SPG_OK) {
         s = spg_sexpr_writer_append_text(&writer, slug);
     }
-    if (s == SPG_OK) {
+    if (s == SPG_OK && with_bytes) {
         s = spg_sexpr_writer_append_text(&writer, ") (bytes ");
     }
-    if (s == SPG_OK) {
-        s = spg_sexpr_writer_append_size(&writer, body_n);
+    if (s == SPG_OK && with_bytes) {
+        s = spg_sexpr_writer_append_size(&writer, bytes);
     }
     if (s == SPG_OK) {
         s = spg_sexpr_writer_append_text(
             &writer, result->save_status == SPG_OK ? ") (status ok))"
                                                    : ") (status error))");
     }
-    (void)description;
     result->payload_used      = writer.used;
     result->payload_truncated = writer.truncated;
 
@@ -78,17 +96,46 @@ enum spg_status spg_mem_executor_step(
     }
     *result = (struct spg_mem_executor_result){.save_status = SPG_OK};
 
+    const enum spg_action_kind kind = recommendation->action_kind;
     if (policy_decision->kind != SPG_POLICY_DECISION_ALLOW ||
-        recommendation->action_kind != SPG_ACTION_MEMORY_SAVE) {
+        (kind != SPG_ACTION_MEMORY_SAVE && kind != SPG_ACTION_MEMORY_DELETE &&
+         kind != SPG_ACTION_MEMORY_READ)) {
         return SPG_E_INVALID_ARG;
     }
 
     char slug[SPG_MEM_SLUG_MAX + 1u];
-    char description[SPG_MEM_DESC_MAX + 1u];
+    if (!copy_span(text_n, text, recommendation->mem_slug, slug, sizeof slug)) {
+        result->save_status = SPG_E_INVALID_ARG;
+        return journal_memory(state, config, op_name(kind), slug, false, 0u,
+                              workspace, result);
+    }
+
+    if (kind == SPG_ACTION_MEMORY_DELETE) {
+        result->save_status = spg_mem_delete(state->store, slug);
+        result->saved       = result->save_status == SPG_OK;
+        return journal_memory(state, config, "memory_delete", slug, false, 0u,
+                              workspace, result);
+    }
+
+    if (kind == SPG_ACTION_MEMORY_READ) {
+        result->was_read = true;
+        if (workspace->recall == nullptr || workspace->recall_capacity == 0u) {
+            result->save_status = SPG_E_INVALID_ARG;
+        } else {
+            result->save_status =
+                spg_mem_read(state->store, slug, workspace->recall_capacity,
+                             workspace->recall, &result->read_len);
+        }
+        result->saved = result->save_status == SPG_OK;
+        return journal_memory(state, config, "memory_read", slug, true,
+                              result->read_len, workspace, result);
+    }
+
+    /* memory_save */
+    char        description[SPG_MEM_DESC_MAX + 1u];
     static char body[SPG_MEM_BODY_MAX + 1u]; /* not on the hot path */
     body[0] = '\0';
-    if (!copy_span(text_n, text, recommendation->mem_slug, slug, sizeof slug) ||
-        !copy_span(text_n, text, recommendation->mem_description, description,
+    if (!copy_span(text_n, text, recommendation->mem_description, description,
                    sizeof description) ||
         !copy_span(text_n, text, recommendation->mem_body, body, sizeof body)) {
         result->save_status = SPG_E_INVALID_ARG;
@@ -97,7 +144,6 @@ enum spg_status spg_mem_executor_step(
             spg_mem_save(state->store, slug, description, body);
     }
     result->saved = result->save_status == SPG_OK;
-
-    return journal_memory(state, config, slug, description, strlen(body),
-                          workspace, result);
+    return journal_memory(state, config, "memory_save", slug, true,
+                          strlen(body), workspace, result);
 }

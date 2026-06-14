@@ -103,6 +103,7 @@ enum spg_status spg_orchestrator_tick(
         .memory_text_n        = state->memory_text_n,
         .memory_text          = state->memory_text,
         .memory_index         = state->memory_index,
+        .memory_recall        = state->memory_recall,
     };
     const struct spg_actor_step_config actor_config = {
         .actor_id            = config->actor_id,
@@ -177,7 +178,9 @@ enum spg_status spg_orchestrator_tick(
         return SPG_OK;
     }
 
-    if (result->recommendation.action_kind == SPG_ACTION_MEMORY_SAVE) {
+    if (result->recommendation.action_kind == SPG_ACTION_MEMORY_SAVE ||
+        result->recommendation.action_kind == SPG_ACTION_MEMORY_DELETE ||
+        result->recommendation.action_kind == SPG_ACTION_MEMORY_READ) {
         if (state->store == nullptr) {
             return SPG_E_INVALID_ARG;
         }
@@ -196,6 +199,8 @@ enum spg_status spg_orchestrator_tick(
         const struct spg_mem_executor_workspace mem_workspace = {
             .payload_capacity = workspace->sim_payload_capacity,
             .payload          = workspace->sim_payload,
+            .recall_capacity  = workspace->memory_recall_capacity,
+            .recall           = workspace->memory_recall_buf,
         };
         status = spg_mem_executor_step(
             &mem_state, &mem_config, result->actor.model_output_n,

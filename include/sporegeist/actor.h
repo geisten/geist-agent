@@ -35,6 +35,7 @@ struct spg_actor_state {
     size_t      memory_text_n;
     const char *memory_text;
     const char *memory_index;
+    const char *memory_recall;
 };
 
 struct spg_actor_step_config {

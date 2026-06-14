@@ -19,6 +19,8 @@ enum spg_action_kind {
     SPG_ACTION_SSH_AUTH_PROBE,
     SPG_ACTION_SIMULATOR,
     SPG_ACTION_MEMORY_SAVE,
+    SPG_ACTION_MEMORY_DELETE,
+    SPG_ACTION_MEMORY_READ,
 };
 
 enum spg_policy_decision_kind {

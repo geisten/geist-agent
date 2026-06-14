@@ -481,6 +481,26 @@ static void append_quoted_span(struct render_state *state, const size_t text_n,
     append_char(state, '"');
 }
 
+static void append_quoted_cstr(struct render_state *state, const char *text) {
+    append_char(state, '"');
+    for (size_t i = 0u; text[i] != '\0'; i += 1u) {
+        const char ch = text[i];
+        if (ch == '"' || ch == '\\') {
+            append_char(state, '\\');
+            append_char(state, ch);
+        } else if (ch == '\n') {
+            append_cstr(state, "\\n");
+        } else if (ch == '\r') {
+            append_cstr(state, "\\r");
+        } else if (ch == '\t') {
+            append_cstr(state, "\\t");
+        } else {
+            append_char(state, ch);
+        }
+    }
+    append_char(state, '"');
+}
+
 static void append_budget_line(struct render_state *state, const char *name,
                                const struct spg_context_budget_item item) {
     append_cstr(state, "  (");
@@ -632,6 +652,18 @@ static void render_memory_index(const struct spg_context_sources *sources,
     append_cstr(state, ")\n");
 }
 
+/* Content of the most recently recalled memory, as a quoted string. */
+static void render_memory_recall(const struct spg_context_sources *sources,
+                                 struct render_state *state) {
+    if (sources->memory_recall == nullptr ||
+        sources->memory_recall[0] == '\0') {
+        return;
+    }
+    append_cstr(state, "(memory_recall ");
+    append_quoted_cstr(state, sources->memory_recall);
+    append_cstr(state, ")\n");
+}
+
 enum spg_status spg_context_render(const struct spg_context_sources *sources,
                                    const struct spg_context_view *view,
                                    const size_t dst_capacity,
@@ -656,6 +688,7 @@ enum spg_status spg_context_render(const struct spg_context_sources *sources,
     render_graph(sources, view, &state);
     render_memory(sources, view, &state);
     render_memory_index(sources, &state);
+    render_memory_recall(sources, &state);
     render_journal(view, &state);
 
     if (state.used < state.capacity) {

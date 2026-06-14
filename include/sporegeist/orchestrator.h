@@ -48,6 +48,7 @@ struct spg_orchestrator_state {
     size_t      memory_text_n;
     const char *memory_text;
     const char *memory_index;
+    const char *memory_recall;
 };
 
 struct spg_orchestrator_config {
@@ -77,6 +78,9 @@ struct spg_orchestrator_workspace {
 
     size_t sim_payload_capacity;
     char  *sim_payload;
+
+    size_t memory_recall_capacity; /* buffer for memory_read content */
+    char  *memory_recall_buf;
 };
 
 struct spg_orchestrator_result {

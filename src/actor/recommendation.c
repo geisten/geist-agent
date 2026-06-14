@@ -129,6 +129,14 @@ static bool parse_action_kind(const size_t input_n, const char input[],
         *out = SPG_ACTION_MEMORY_SAVE;
         return true;
     }
+    if (spg_sexpr_span_eq_cstr(input_n, input, span, "memory_delete")) {
+        *out = SPG_ACTION_MEMORY_DELETE;
+        return true;
+    }
+    if (spg_sexpr_span_eq_cstr(input_n, input, span, "memory_read")) {
+        *out = SPG_ACTION_MEMORY_READ;
+        return true;
+    }
     return false;
 }
 
@@ -152,6 +160,12 @@ static bool kind_fields_match(const struct spg_recommendation *out) {
         return !out->action.uses_network && !out->has_command &&
                !out->has_target && out->has_slug && out->has_description &&
                out->has_body;
+    case SPG_ACTION_MEMORY_DELETE:
+    case SPG_ACTION_MEMORY_READ:
+        /* delete/read need only a slug. */
+        return !out->action.uses_network && !out->has_command &&
+               !out->has_target && out->has_slug && !out->has_description &&
+               !out->has_body;
     }
     return false;
 }

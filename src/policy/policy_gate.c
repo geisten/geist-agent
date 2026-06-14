@@ -63,6 +63,10 @@ static const char *action_kind_name(const enum spg_action_kind kind) {
         return "simulator";
     case SPG_ACTION_MEMORY_SAVE:
         return "memory_save";
+    case SPG_ACTION_MEMORY_DELETE:
+        return "memory_delete";
+    case SPG_ACTION_MEMORY_READ:
+        return "memory_read";
     }
     return "unknown";
 }
