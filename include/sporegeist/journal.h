@@ -46,6 +46,13 @@ struct spg_journal_writer {
     FILE    *file;
     uint64_t next_sequence;
     uint8_t  last_hash[SPG_JOURNAL_HASH_BYTES];
+
+    /* Optional in-memory log of every header written, for callers (e.g. the
+     * agent loop) that feed the trajectory back into context without re-reading
+     * the file. Null = disabled; capped, drops once full. */
+    struct spg_journal_record_header *header_log;
+    size_t                            header_log_capacity;
+    size_t                            header_log_count;
 };
 
 struct spg_journal_reader {
@@ -70,6 +77,12 @@ spg_journal_writer_append(struct spg_journal_writer *writer,
                           uint64_t *out_sequence);
 [[nodiscard]] enum spg_status
 spg_journal_writer_close(struct spg_journal_writer *writer);
+
+/* Bind a caller-owned array that receives a copy of every header subsequently
+ * written (count reset to 0). Pass capacity 0 / null to disable. */
+void spg_journal_writer_set_header_log(
+    struct spg_journal_writer *writer, size_t capacity,
+    struct spg_journal_record_header headers[]);
 
 [[nodiscard]] enum spg_status
 spg_journal_reader_open(struct spg_journal_reader *reader, const char *path);

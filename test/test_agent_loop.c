@@ -67,6 +67,7 @@ struct loop_fixture {
     char                           observation[4096];
     char                           shell_stdout[4096];
     char                           shell_stderr[1024];
+    struct spg_journal_record_header trajectory[256];
 };
 
 static int load_policy(struct spg_policy_config *policy) {
@@ -177,7 +178,9 @@ static int run_script(const struct spg_fake_response *resp, const size_t count,
                  .exec_timeout_ms     = 5000u,
                  .exec_stdout_cap     = sizeof fx->shell_stdout,
                  .exec_stderr_cap     = sizeof fx->shell_stderr},
-        .max_steps = max_steps,
+        .max_steps               = max_steps,
+        .journal_header_capacity = sizeof fx->trajectory / sizeof fx->trajectory[0],
+        .journal_headers         = fx->trajectory,
     };
 
     (void)spg_agent_loop_run(&state, &loop_config, &workspace, &fx->usage, out);
@@ -279,9 +282,38 @@ static int test_rejected(void) {
     return ok;
 }
 
+static int test_trajectory_feedback(void) {
+    /* A first sim step is journaled; the second step's rendered context must
+     * carry that event back as recent_events (closed-loop trajectory). */
+    static const struct spg_fake_response script[] = {
+        FR("(recommend (kind simulator) (capability \"sim.act\") (cost 1) "
+           "(uses_network false) (confidence_bp 7000) (reason \"r\"))"),
+        FR("(recommend (kind finish) (reason \"done\"))"),
+    };
+    struct loop_fixture          fx = {};
+    struct spg_agent_loop_result out = {};
+    if (run_script(script, 2u, 5u, false, &fx, &out) != 0) {
+        teardown(&fx);
+        return 1;
+    }
+    /* fx.context holds the final (finish) step's prompt, which must include the
+     * first step's journaled event(s). */
+    const int ok = (out.termination == SPG_AGENT_LOOP_FINISHED &&
+                    out.steps_taken == 2u &&
+                    strstr(fx.context, "(event (sequence ") != nullptr)
+                       ? 0
+                       : 1;
+    teardown(&fx);
+    return ok;
+}
+
 int main(void) {
     if (test_finish_terminates() != 0) {
         fprintf(stderr, "test_finish_terminates failed\n");
+        return 1;
+    }
+    if (test_trajectory_feedback() != 0) {
+        fprintf(stderr, "test_trajectory_feedback failed\n");
         return 1;
     }
     if (test_max_steps() != 0) {

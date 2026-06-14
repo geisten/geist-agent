@@ -185,9 +185,25 @@ enum spg_status spg_journal_writer_append(
     }
 
     memcpy(writer->last_hash, header.record_hash, SPG_JOURNAL_HASH_BYTES);
+    if (writer->header_log != nullptr &&
+        writer->header_log_count < writer->header_log_capacity) {
+        writer->header_log[writer->header_log_count] = header;
+        writer->header_log_count += 1u;
+    }
     *out_sequence = writer->next_sequence;
     writer->next_sequence += 1u;
     return SPG_OK;
+}
+
+void spg_journal_writer_set_header_log(
+    struct spg_journal_writer *writer, const size_t capacity,
+    struct spg_journal_record_header headers[]) {
+    if (writer == nullptr) {
+        return;
+    }
+    writer->header_log          = capacity > 0u ? headers : nullptr;
+    writer->header_log_capacity = capacity;
+    writer->header_log_count    = 0u;
 }
 
 enum spg_status spg_journal_writer_close(struct spg_journal_writer *writer) {

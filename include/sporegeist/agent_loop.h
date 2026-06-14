@@ -34,6 +34,13 @@ struct spg_agent_loop_config {
     struct spg_orchestrator_config base;
     size_t                         max_steps;
     uint64_t                       token_budget; /* 0 = unlimited */
+
+    /* Optional trajectory feedback: a caller-owned array the loop binds to the
+     * journal writer so every event from earlier steps is rendered into the
+     * next step's context (the agent sees its own history, not just the last
+     * observation). Null disables it. Requires base.write_journal + a journal. */
+    size_t                            journal_header_capacity;
+    struct spg_journal_record_header *journal_headers;
 };
 
 struct spg_agent_loop_result {

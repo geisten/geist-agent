@@ -1873,6 +1873,7 @@ static int agent_command(int argc, char **argv) {
     static char            observation[AGENT_OBS_BYTES];
     static char            shell_stdout[AGENT_SHELL_STDOUT];
     static char            shell_stderr[AGENT_SHELL_STDERR];
+    static struct spg_journal_record_header trajectory[256];
     observation[0] = '\0';
 
     const struct spg_orchestrator_workspace workspace = {
@@ -1933,8 +1934,10 @@ static int agent_command(int argc, char **argv) {
                  .exec_timeout_ms     = 5000u,
                  .exec_stdout_cap     = sizeof shell_stdout,
                  .exec_stderr_cap     = sizeof shell_stderr},
-        .max_steps    = max_steps,
-        .token_budget = run.budgets.tokens,
+        .max_steps               = max_steps,
+        .token_budget            = run.budgets.tokens,
+        .journal_header_capacity = sizeof trajectory / sizeof trajectory[0],
+        .journal_headers         = trajectory,
     };
     struct spg_agent_loop_result loop_result = {};
     status =

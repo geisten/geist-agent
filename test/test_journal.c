@@ -267,7 +267,39 @@ static int test_invalid_args(void) {
     return 0;
 }
 
+static int test_header_log(void) {
+    struct spg_journal_writer        writer = {};
+    struct spg_journal_record_header log[4];
+    const uint8_t                    p[] = {'x'};
+    uint64_t                         seq = 0u;
+
+    unlink(journal_path);
+    if (spg_journal_writer_open(&writer, journal_path) != SPG_OK) {
+        return 1;
+    }
+    spg_journal_writer_set_header_log(&writer, 2u, log); /* cap 2 */
+    for (int i = 0; i < 3; i += 1) {
+        if (spg_journal_writer_append(&writer, 10u, 0u, SPG_JOURNAL_EVENT_ACTION,
+                                      SPG_OK, sizeof p, p, &seq) != SPG_OK) {
+            (void)spg_journal_writer_close(&writer);
+            return 1;
+        }
+    }
+    /* Logged the first two headers (capped), in order, with their sequences. */
+    const int ok = (writer.header_log_count == 2u && log[0].sequence == 1u &&
+                    log[0].event_kind == (uint32_t)SPG_JOURNAL_EVENT_ACTION &&
+                    log[1].sequence == 2u)
+                       ? 0
+                       : 1;
+    (void)spg_journal_writer_close(&writer);
+    return ok;
+}
+
 int main(void) {
+    if (test_header_log() != 0) {
+        fprintf(stderr, "test_header_log failed\n");
+        return 1;
+    }
     if (test_write_read_roundtrip() != 0) {
         fprintf(stderr, "test_write_read_roundtrip failed\n");
         return 1;

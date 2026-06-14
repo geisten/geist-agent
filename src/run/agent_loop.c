@@ -89,12 +89,28 @@ enum spg_status spg_agent_loop_run(
     };
     state->usage = usage;
 
+    /* Trajectory feedback: bind the journal writer's header log to the caller
+     * array so each step's events become visible to the next step's context. */
+    const bool feedback = config->journal_headers != nullptr &&
+                          config->journal_header_capacity > 0u &&
+                          state->journal != nullptr;
+    if (feedback) {
+        spg_journal_writer_set_header_log(state->journal,
+                                          config->journal_header_capacity,
+                                          config->journal_headers);
+        state->journal_headers = config->journal_headers;
+    }
+
     uint64_t parent_sequence = config->base.parent_sequence;
     for (size_t step = 0u; step < config->max_steps; step += 1u) {
         if (config->token_budget > 0u &&
             usage->consumed.tokens >= config->token_budget) {
             result->termination = SPG_AGENT_LOOP_BUDGET;
             return SPG_OK;
+        }
+        /* Expose every event logged so far (steps 1..step-1) to this step. */
+        if (feedback) {
+            state->journal_header_count = state->journal->header_log_count;
         }
 
         struct spg_orchestrator_config step_config = config->base;
