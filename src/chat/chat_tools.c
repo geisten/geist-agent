@@ -48,30 +48,6 @@ static void span_to_buf(const char *input, struct spg_text_span span, char *buf,
     buf[take] = '\0';
 }
 
-/* Split s on whitespace in place; argv[i] point into s. No quoting. */
-static size_t split_ws(char *s, const char *argv[], const size_t max) {
-    size_t n = 0u;
-    char  *p = s;
-    while (*p != '\0' && n < max) {
-        while (*p == ' ' || *p == '\t') {
-            p += 1u;
-        }
-        if (*p == '\0') {
-            break;
-        }
-        argv[n] = p;
-        n += 1u;
-        while (*p != '\0' && *p != ' ' && *p != '\t') {
-            p += 1u;
-        }
-        if (*p != '\0') {
-            *p = '\0';
-            p += 1u;
-        }
-    }
-    return n;
-}
-
 static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
                      bool allow_exec, char out[], const size_t out_cap,
                      size_t input_n) {
@@ -89,7 +65,7 @@ static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
     char cmd[EXEC_CMD_CAP];
     span_to_buf(input, cspan, cmd, sizeof cmd);
     const char  *argv[SPG_CMD_MAX_ARGS];
-    const size_t argc = split_ws(cmd, argv, SPG_CMD_MAX_ARGS);
+    const size_t argc = spg_cmd_split_ws(cmd, SPG_CMD_MAX_ARGS, argv);
     if (argc == 0u) {
         (void)snprintf(out, out_cap, "error: empty command");
         return;

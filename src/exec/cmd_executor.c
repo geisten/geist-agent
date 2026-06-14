@@ -24,6 +24,30 @@ extern char **environ;
 
 #define READ_CHUNK 4096u
 
+size_t spg_cmd_split_ws(char *s, const size_t argv_cap,
+                        const char *argv[static argv_cap]) {
+    size_t n = 0u;
+    char  *p = s;
+    while (*p != '\0' && n < argv_cap) {
+        while (*p == ' ' || *p == '\t') {
+            p += 1u;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        argv[n] = p;
+        n += 1u;
+        while (*p != '\0' && *p != ' ' && *p != '\t') {
+            p += 1u;
+        }
+        if (*p != '\0') {
+            *p = '\0';
+            p += 1u;
+        }
+    }
+    return n;
+}
+
 static uint64_t now_ns(void) {
     struct timespec ts = {};
     clock_gettime(CLOCK_MONOTONIC, &ts);

@@ -77,6 +77,7 @@ SPG_SOURCES := \
     src/exec/cmd_registry.c \
     src/exec/exec_command.c \
     src/exec/host_probe.c \
+    src/exec/shell_executor.c \
     src/executor/executor_boundary.c \
     src/graph/graph.c \
     src/journal/journal.c \

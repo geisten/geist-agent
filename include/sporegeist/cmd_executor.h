@@ -66,6 +66,12 @@ struct spg_cmd_result {
 spg_cmd_executor_run(size_t n, const struct spg_cmd_request reqs[],
                      struct spg_cmd_result results[]);
 
+/* Split s on spaces/tabs in place (writing NUL terminators), storing pointers
+ * to up to argv_cap tokens in argv. No quoting or escapes. Returns the token
+ * count (argc). s is mutated; argv[i] point into it. */
+size_t spg_cmd_split_ws(char *s, size_t argv_cap,
+                        const char *argv[static argv_cap]);
+
 #ifdef __cplusplus
 }
 #endif
