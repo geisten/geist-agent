@@ -31,9 +31,11 @@ grep -q "name: fact1" "$T/mem/fact1.md"
 grep -q "the body text" "$T/mem/fact1.md"
 "$SPG_BIN" verify-journal "$T/j.sgj" | grep -q "event.memory"
 
-# determinism: a second identical run yields a byte-identical journal
+# determinism: a second run from the SAME starting state yields a byte-identical
+# journal. The memory store persists across runs (that is the point), so it must
+# be reset to its initial empty state for the comparison to hold.
 cp "$T/j.sgj" "$T/j_first.sgj"
-rm "$T/j.sgj"
+rm -rf "$T/j.sgj" "$T/mem"
 "$SPG_BIN" run --config "$T/run.spg" --memory-dir "$T/mem" --fake "$REC" --ticks 1 >/dev/null 2>&1
 cmp "$T/j_first.sgj" "$T/j.sgj"
 

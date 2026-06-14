@@ -33,6 +33,8 @@ struct spg_context_sources {
     const char                        *graph_text;
     size_t                             memory_text_n;
     const char                        *memory_text;
+    /* Pre-rendered long-term memory index (one hook per line), or null. */
+    const char                        *memory_index;
 };
 
 struct spg_context_budget_item {

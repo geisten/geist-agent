@@ -618,6 +618,20 @@ static void render_journal(const struct spg_context_view *view,
     append_cstr(state, ")\n");
 }
 
+/* Long-term memory index: a readable block of one hook per line so the model
+ * knows what it can recall. The raw lines are emitted as-is (this is prompt
+ * text, not re-parsed). */
+static void render_memory_index(const struct spg_context_sources *sources,
+                                struct render_state *state) {
+    if (sources->memory_index == nullptr ||
+        sources->memory_index[0] == '\0') {
+        return;
+    }
+    append_cstr(state, "(memory_index\n");
+    append_cstr(state, sources->memory_index);
+    append_cstr(state, ")\n");
+}
+
 enum spg_status spg_context_render(const struct spg_context_sources *sources,
                                    const struct spg_context_view *view,
                                    const size_t dst_capacity,
@@ -641,6 +655,7 @@ enum spg_status spg_context_render(const struct spg_context_sources *sources,
     render_budgets(&state, &view->budgets);
     render_graph(sources, view, &state);
     render_memory(sources, view, &state);
+    render_memory_index(sources, &state);
     render_journal(view, &state);
 
     if (state.used < state.capacity) {

@@ -1483,6 +1483,7 @@ static int run_loop(const char *run_path, const char *fake_output,
     };
 
     struct spg_policy_usage usage = {};
+    char                    mem_index_buf[4096] = {0};
     struct spg_orchestrator_state state = {
         .graph         = &graph,
         .memory        = &memory,
@@ -1499,10 +1500,17 @@ static int run_loop(const char *run_path, const char *fake_output,
         .graph_text    = nullptr,
         .memory_text_n = 0u,
         .memory_text   = nullptr,
+        .memory_index  = have_store ? mem_index_buf : nullptr,
     };
 
     uint64_t parent_sequence = 0u;
     for (size_t i = 0u; i < ticks; i += 1u) {
+        /* Refresh the memory index so the context reflects saves from prior
+         * ticks. */
+        if (have_store) {
+            (void)spg_mem_index(&mem_store_obj, sizeof mem_index_buf,
+                                mem_index_buf, nullptr, nullptr);
+        }
         if (run.budgets.tokens > 0u &&
             usage.consumed.tokens >= run.budgets.tokens) {
             fprintf(stderr, "run: token budget exhausted before tick %zu\n",

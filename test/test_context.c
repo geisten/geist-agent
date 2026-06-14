@@ -263,6 +263,41 @@ static int test_render_and_limit(void) {
     return 0;
 }
 
+static int test_render_memory_index(void) {
+    struct spg_context_graph_ref   graph_refs[1];
+    struct spg_context_memory_ref  memory_refs[1];
+    struct spg_context_journal_ref journal_refs[1];
+    struct spg_context_view        view = {};
+    spg_context_view_init(&view, 1u, graph_refs, 1u, memory_refs, 1u,
+                          journal_refs);
+    const struct spg_context_limits limits = {0};
+
+    /* With an index, the rendered context carries a (memory_index ...) block. */
+    const struct spg_context_sources with = {
+        .memory_index = "- auth-flow: how login works\n",
+    };
+    if (spg_context_build(&with, &limits, &view) != SPG_OK) {
+        return 1;
+    }
+    char   buf[2048];
+    size_t required = 0u;
+    if (spg_context_render(&with, &view, sizeof buf, buf, &required) != SPG_OK) {
+        return 1;
+    }
+    if (strstr(buf, "(memory_index") == nullptr ||
+        strstr(buf, "- auth-flow: how login works") == nullptr) {
+        return 1;
+    }
+
+    /* Without an index, the block is omitted. */
+    const struct spg_context_sources without = {.memory_index = nullptr};
+    if (spg_context_render(&without, &view, sizeof buf, buf, &required) !=
+        SPG_OK) {
+        return 1;
+    }
+    return strstr(buf, "memory_index") == nullptr ? 0 : 1;
+}
+
 static int test_invalid_args(void) {
     struct spg_context_graph_ref   graph_refs[1];
     struct spg_context_memory_ref  memory_refs[1];
@@ -307,6 +342,10 @@ int main(void) {
     }
     if (test_render_and_limit() != 0) {
         fprintf(stderr, "test_render_and_limit failed\n");
+        return 1;
+    }
+    if (test_render_memory_index() != 0) {
+        fprintf(stderr, "test_render_memory_index failed\n");
         return 1;
     }
     if (test_invalid_args() != 0) {

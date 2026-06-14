@@ -143,6 +143,7 @@ spg_actor_step(struct spg_actor_state *state,
         .graph_text           = state->graph_text,
         .memory_text_n        = state->memory_text_n,
         .memory_text          = state->memory_text,
+        .memory_index         = state->memory_index,
     };
 
     enum spg_status status = spg_context_build(
