@@ -524,6 +524,8 @@ static void print_budget_summary(const struct spg_run_budgets *budgets) {
            (unsigned long long)budgets->shell_actions);
     printf("budget.sim_actions=%llu\n",
            (unsigned long long)budgets->sim_actions);
+    printf("budget.memory_actions=%llu\n",
+           (unsigned long long)budgets->memory_actions);
     printf("budget.wall_ms=%llu\n", (unsigned long long)budgets->wall_ms);
     printf("budget.journal_bytes=%llu\n",
            (unsigned long long)budgets->journal_bytes);
@@ -667,6 +669,10 @@ static void update_run_usage(struct spg_policy_usage *usage,
                    (uint64_t)result->actor.tokens_decoded);
     if (result->sim_executed) {
         add_budget_u64(&usage->consumed.sim_actions,
+                       result->recommendation.action.cost);
+    }
+    if (result->memory_executed) {
+        add_budget_u64(&usage->consumed.memory_actions,
                        result->recommendation.action.cost);
     }
 }
@@ -939,6 +945,8 @@ static enum spg_status write_run_state_file(
     WRITE_STATE_U64(usage->consumed.shell_actions);
     WRITE_STATE_TEXT(",\"sim_actions\":");
     WRITE_STATE_U64(usage->consumed.sim_actions);
+    WRITE_STATE_TEXT(",\"memory_actions\":");
+    WRITE_STATE_U64(usage->consumed.memory_actions);
     WRITE_STATE_TEXT("}");
     WRITE_STATE_TEXT(",\"graph\":{\"nodes\":");
     WRITE_STATE_U64((uint64_t)graph->node_count);

@@ -30,6 +30,8 @@ static void build_budgets(const struct spg_run_config *run,
                                      consumed.shell_actions),
         .sim_actions   = budget_item(configured.sim_actions,
                                      consumed.sim_actions),
+        .memory_actions = budget_item(configured.memory_actions,
+                                      consumed.memory_actions),
         .wall_ms       = budget_item(configured.wall_ms, consumed.wall_ms),
         .journal_bytes = budget_item(configured.journal_bytes,
                                      consumed.journal_bytes),
@@ -536,6 +538,7 @@ static void render_budgets(struct render_state *state,
     append_budget_line(state, "tokens", budgets->tokens);
     append_budget_line(state, "shell_actions", budgets->shell_actions);
     append_budget_line(state, "sim_actions", budgets->sim_actions);
+    append_budget_line(state, "memory_actions", budgets->memory_actions);
     append_budget_line(state, "wall_ms", budgets->wall_ms);
     append_budget_line(state, "journal_bytes", budgets->journal_bytes);
     append_budget_line(state, "risk_bp", budgets->risk_bp);

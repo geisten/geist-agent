@@ -12,16 +12,23 @@
 struct budget_field {
     const char *name;
     size_t      offset;
+    bool        optional; /* absent in config -> fallback default, not an error */
+    uint64_t    fallback;
 };
 
 static const struct budget_field budget_fields[] = {
-    {"inference_steps", offsetof(struct spg_run_budgets, inference_steps)},
-    {"tokens", offsetof(struct spg_run_budgets, tokens)},
-    {"shell_actions", offsetof(struct spg_run_budgets, shell_actions)},
-    {"sim_actions", offsetof(struct spg_run_budgets, sim_actions)},
-    {"wall_ms", offsetof(struct spg_run_budgets, wall_ms)},
-    {"journal_bytes", offsetof(struct spg_run_budgets, journal_bytes)},
-    {"risk_bp", offsetof(struct spg_run_budgets, risk_bp)},
+    {"inference_steps", offsetof(struct spg_run_budgets, inference_steps), false,
+     0u},
+    {"tokens", offsetof(struct spg_run_budgets, tokens), false, 0u},
+    {"shell_actions", offsetof(struct spg_run_budgets, shell_actions), false,
+     0u},
+    {"sim_actions", offsetof(struct spg_run_budgets, sim_actions), false, 0u},
+    {"memory_actions", offsetof(struct spg_run_budgets, memory_actions), true,
+     UINT64_MAX},
+    {"wall_ms", offsetof(struct spg_run_budgets, wall_ms), false, 0u},
+    {"journal_bytes", offsetof(struct spg_run_budgets, journal_bytes), false,
+     0u},
+    {"risk_bp", offsetof(struct spg_run_budgets, risk_bp), false, 0u},
 };
 
 static constexpr size_t budget_field_count =
@@ -95,11 +102,17 @@ enum spg_status spg_run_budgets_parse(
     }
 
     for (size_t i = 0u; i < budget_field_count; i += 1u) {
-        if (!seen[i]) {
-            *err_node   = budgets_field;
-            *err_offset = nodes[budgets_field].span.offset;
-            return SPG_E_SCHEMA;
+        if (seen[i]) {
+            continue;
         }
+        if (budget_fields[i].optional) {
+            *(uint64_t *)((char *)out + budget_fields[i].offset) =
+                budget_fields[i].fallback;
+            continue;
+        }
+        *err_node   = budgets_field;
+        *err_offset = nodes[budgets_field].span.offset;
+        return SPG_E_SCHEMA;
     }
     return SPG_OK;
 }

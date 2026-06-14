@@ -50,6 +50,7 @@ struct spg_context_budget_view {
     struct spg_context_budget_item tokens;
     struct spg_context_budget_item shell_actions;
     struct spg_context_budget_item sim_actions;
+    struct spg_context_budget_item memory_actions;
     struct spg_context_budget_item wall_ms;
     struct spg_context_budget_item journal_bytes;
     struct spg_context_budget_item risk_bp;

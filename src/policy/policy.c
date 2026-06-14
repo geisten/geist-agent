@@ -61,8 +61,7 @@ static uint64_t consumed_for_action(const struct spg_policy_usage *usage,
     case SPG_ACTION_MEMORY_SAVE:
     case SPG_ACTION_MEMORY_DELETE:
     case SPG_ACTION_MEMORY_READ:
-        /* No dedicated memory budget yet; shares the sim_actions bucket. */
-        return usage->consumed.sim_actions;
+        return usage->consumed.memory_actions;
     default:
         return UINT64_MAX;
     }
@@ -80,7 +79,7 @@ static uint64_t global_budget_for_action(const struct spg_policy_config *policy,
     case SPG_ACTION_MEMORY_SAVE:
     case SPG_ACTION_MEMORY_DELETE:
     case SPG_ACTION_MEMORY_READ:
-        return policy->budgets.sim_actions;
+        return policy->budgets.memory_actions;
     default:
         return 0u;
     }
