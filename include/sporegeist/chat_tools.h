@@ -1,6 +1,7 @@
 #ifndef SPOREGEIST_CHAT_TOOLS_H
 #define SPOREGEIST_CHAT_TOOLS_H
 
+#include "sporegeist/journal.h"
 #include "sporegeist/mem_store.h"
 #include "sporegeist/status.h"
 
@@ -26,13 +27,18 @@ extern "C" {
  *   (tool memory_delete (slug "<slug>"))
  *   (tool exec (command "<shell command>"))   [only when allow_exec]
  *
- * exec runs a command via the bounded executor (timeout + output caps). It is
- * gated behind allow_exec; when false the tool reports that exec is disabled.
+ * Side effects run through the shared governed executors (shell_executor /
+ * mem_executor) and the executor boundary, so chat's tool calls enforce the
+ * same execution contract as the orchestrator. When journal is non-null, each
+ * side-effecting call is recorded there (audit trail); memory_list is a
+ * read-only query and is not journaled. exec is gated behind allow_exec; when
+ * false the tool reports that exec is disabled.
  *
  * Returns SPG_E_INVALID_ARG on null arguments; otherwise SPG_OK (a tool's own
  * failure is reported in the result text, not the return value). */
 [[nodiscard]] enum spg_status
-spg_chat_tool_dispatch(struct spg_mem_store *store, bool allow_exec,
+spg_chat_tool_dispatch(struct spg_mem_store *store,
+                       struct spg_journal_writer *journal, bool allow_exec,
                        size_t input_n, const char *input, size_t out_cap,
                        char out[], bool *was_tool);
 

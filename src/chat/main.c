@@ -30,7 +30,7 @@ static void print_usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s [--model <path>] [--max-tokens <n>] [--no-download] "
             "[--fake] [--transcript <path>] [--memory-dir <path>] "
-            "[--allow-exec]\n"
+            "[--journal <path>] [--allow-exec]\n"
             "\n"
             "Interactive sporegeist chat REPL.\n"
             "Connects to a Gemma 4 GGUF via the geist engine. The model path is\n"
@@ -110,6 +110,7 @@ struct chat_args {
     const char *model_path;
     const char *transcript_path;
     const char *memory_dir;
+    const char *journal_path;
     size_t      max_tokens;
     bool        allow_download;
     bool        allow_exec;
@@ -155,6 +156,10 @@ static int parse_args(int argc, char **argv, struct chat_args *out) {
         }
         if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
             out->memory_dir = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--journal") == 0 && i + 1 < argc) {
+            out->journal_path = argv[++i];
             continue;
         }
         if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc) {
@@ -373,6 +378,22 @@ int main(int argc, char **argv) {
         }
     }
 
+    struct spg_journal_writer journal      = {};
+    bool                      have_journal = false;
+    struct spg_journal_writer *journal_ptr = nullptr;
+    if (args.journal_path != nullptr) {
+        if (spg_journal_writer_open(&journal, args.journal_path) != SPG_OK) {
+            fprintf(stderr, "sporegeist-chat: journal open failed\n");
+            if (transcript != nullptr) {
+                (void)fclose(transcript);
+            }
+            spg_model_adapter_destroy(&adapter);
+            return 1;
+        }
+        have_journal = true;
+        journal_ptr  = &journal;
+    }
+
     puts("sporegeist-chat ready. /quit, /reset, /memories, /recall <slug>, "
          "/remember <slug> <desc>, /forget <slug>.");
     char                    line[CHAT_LINE_BYTES];
@@ -506,9 +527,10 @@ int main(int argc, char **argv) {
             }
             static char tool_result[CHAT_OUTPUT_BYTES];
             bool        was_tool = false;
-            (void)spg_chat_tool_dispatch(&mem, args.allow_exec, strlen(output),
-                                         output, sizeof tool_result,
-                                         tool_result, &was_tool);
+            (void)spg_chat_tool_dispatch(&mem, journal_ptr, args.allow_exec,
+                                         strlen(output), output,
+                                         sizeof tool_result, tool_result,
+                                         &was_tool);
             if (!was_tool) {
                 break;
             }
@@ -547,6 +569,9 @@ int main(int argc, char **argv) {
     }
 
     spg_model_adapter_destroy(&adapter);
+    if (have_journal) {
+        (void)spg_journal_writer_close(&journal);
+    }
     if (transcript != nullptr && fclose(transcript) != 0) {
         fprintf(stderr, "sporegeist-chat: transcript close failed\n");
         return 1;

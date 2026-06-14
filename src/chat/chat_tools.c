@@ -1,8 +1,8 @@
 #include "sporegeist/chat_tools.h"
 
-#include "sporegeist/cmd_executor.h"
-#include "sporegeist/executor_boundary.h"
+#include "sporegeist/mem_executor.h"
 #include "sporegeist/sexpr.h"
+#include "sporegeist/shell_executor.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -14,7 +14,6 @@
 #define EXEC_TIMEOUT_MS 5000u
 #define EXEC_STDOUT_CAP 4096u
 #define EXEC_STDERR_CAP 1024u
-#define EXEC_CMD_CAP    1024u
 
 /* Find a (argname "value") child under the tool form and return the value's
  * string-payload span (quotes stripped). */
@@ -48,9 +47,19 @@ static void span_to_buf(const char *input, struct spg_text_span span, char *buf,
     buf[take] = '\0';
 }
 
-static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
-                     bool allow_exec, char out[], const size_t out_cap,
-                     size_t input_n) {
+/* A monotonic logical timestamp for the chat audit trail (chat is interactive,
+ * so wall-clock determinism is not required). */
+static uint64_t journal_clock(const struct spg_journal_writer *journal) {
+    return journal != nullptr ? journal->next_sequence : 1u;
+}
+
+/* Run a (tool exec (command "...")) through the governed shell executor: the
+ * boundary gates it, the command executor runs it, and the journal records it.
+ * The executor's observation (exit code + output, or the denial) is the result. */
+static void run_exec(size_t input_n, const char *input,
+                     const struct spg_sexpr_node *nodes, bool allow_exec,
+                     struct spg_journal_writer *journal, char out[],
+                     const size_t out_cap) {
     if (!allow_exec) {
         (void)snprintf(out, out_cap,
                        "error: exec is disabled (start sporegeist-chat with "
@@ -62,70 +71,137 @@ static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
         (void)snprintf(out, out_cap, "error: exec needs (command \"...\")");
         return;
     }
-    char cmd[EXEC_CMD_CAP];
-    span_to_buf(input, cspan, cmd, sizeof cmd);
-    const char  *argv[SPG_CMD_MAX_ARGS];
-    const size_t argc = spg_cmd_split_ws(cmd, SPG_CMD_MAX_ARGS, argv);
-    if (argc == 0u) {
-        (void)snprintf(out, out_cap, "error: empty command");
+
+    static char payload[1024];
+    static char obs[EXEC_STDOUT_CAP];
+    static char so[EXEC_STDOUT_CAP];
+    static char se[EXEC_STDERR_CAP];
+    struct spg_shell_executor_state state = {.journal = journal};
+    const struct spg_shell_executor_config config = {
+        .actor_id               = 1u,
+        .timestamp_ns           = journal_clock(journal),
+        .parent_sequence        = 0u,
+        .write_journal          = journal != nullptr,
+        .execution_enabled      = true,
+        .working_dir            = ".",
+        .allowed_workdir_prefix = ".",
+        .timeout_ms             = EXEC_TIMEOUT_MS,
+        .max_stdout_bytes       = sizeof so,
+        .max_stderr_bytes       = sizeof se,
+    };
+    const struct spg_shell_executor_workspace ws = {
+        .payload_capacity     = sizeof payload,
+        .payload              = payload,
+        .observation_capacity = sizeof obs,
+        .observation          = obs,
+        .stdout_capacity      = sizeof so,
+        .stdout_buf           = so,
+        .stderr_capacity      = sizeof se,
+        .stderr_buf           = se,
+    };
+    const struct spg_recommendation rec = {
+        .state       = SPG_RECOMMENDATION_VALID,
+        .action_kind = SPG_ACTION_LOCAL_SHELL,
+        .action      = {.uses_network = false},
+        .command     = cspan,
+        .has_command = true,
+    };
+    const struct spg_policy_decision decision = {
+        .kind = SPG_POLICY_DECISION_ALLOW,
+    };
+    struct spg_shell_executor_result result = {};
+    (void)spg_shell_executor_step(&state, &config, input_n, input, &rec,
+                                  &decision, &ws, &result);
+    (void)snprintf(out, out_cap, "%s", obs);
+}
+
+/* Run a memory_save/delete/read through the governed memory executor so the
+ * side effect is journaled. The human-readable result is formatted from the
+ * outcome (and the recall buffer for reads). */
+static void run_memory(struct spg_mem_store *store,
+                       struct spg_journal_writer *journal,
+                       const enum spg_action_kind kind, size_t input_n,
+                       const char *input, const struct spg_sexpr_node *nodes,
+                       char out[], const size_t out_cap) {
+    struct spg_text_span slug_span = {};
+    struct spg_text_span desc_span = {};
+    struct spg_text_span body_span = {};
+    const bool has_slug = arg_string(input_n, input, nodes, 0u, "slug", &slug_span);
+    if (!has_slug) {
+        (void)snprintf(out, out_cap, "error: %s needs a slug",
+                       spg_action_kind_to_string(kind));
         return;
+    }
+    char slug[SPG_MEM_SLUG_MAX + 1u];
+    span_to_buf(input, slug_span, slug, sizeof slug);
+
+    struct spg_recommendation rec = {
+        .state       = SPG_RECOMMENDATION_VALID,
+        .action_kind = kind,
+        .mem_slug    = slug_span,
+        .has_slug    = true,
+    };
+    if (kind == SPG_ACTION_MEMORY_SAVE) {
+        rec.has_description =
+            arg_string(input_n, input, nodes, 0u, "description", &desc_span);
+        rec.has_body = arg_string(input_n, input, nodes, 0u, "body", &body_span);
+        rec.mem_description = desc_span;
+        rec.mem_body        = body_span;
+        if (!rec.has_description || !rec.has_body) {
+            (void)snprintf(out, out_cap,
+                           "error: cannot save (need slug, description, body)");
+            return;
+        }
     }
 
-    /* Gate the run through the shared executor boundary -- the single place
-     * that decides whether a shell command may run -- so the chat tool and the
-     * CLI exec command enforce the same contract. */
-    const struct spg_executor_boundary_config bcfg = {
-        .execution_enabled      = allow_exec,
-        .allowed_workdir_prefix = "/",
-        .max_timeout_ms         = EXEC_TIMEOUT_MS,
-        .max_stdout_bytes       = EXEC_STDOUT_CAP,
-        .max_stderr_bytes       = EXEC_STDERR_CAP,
-        .require_clean_env      = false,
+    static char payload[1024];
+    static char recall[SPG_MEM_BODY_MAX + 1u];
+    struct spg_mem_executor_state state = {.store = store, .journal = journal};
+    const struct spg_mem_executor_config config = {
+        .actor_id        = 1u,
+        .timestamp_ns    = journal_clock(journal),
+        .parent_sequence = 0u,
+        .write_journal   = journal != nullptr,
     };
-    const struct spg_executor_boundary_request breq = {
-        .working_dir        = "/",
-        .timeout_ms         = EXEC_TIMEOUT_MS,
-        .stdout_limit_bytes = EXEC_STDOUT_CAP,
-        .stderr_limit_bytes = EXEC_STDERR_CAP,
-        .env_cleared        = false,
+    const struct spg_mem_executor_workspace ws = {
+        .payload_capacity = sizeof payload,
+        .payload          = payload,
+        .recall_capacity  = sizeof recall,
+        .recall           = recall,
     };
-    struct spg_executor_boundary_plan plan = {};
-    if (spg_executor_boundary_check_shell(&bcfg, argv[0], false, &breq, &plan) !=
-        SPG_OK) {
-        (void)snprintf(out, out_cap, "error: exec internal boundary error");
-        return;
-    }
-    if (!plan.approved) {
-        (void)snprintf(out, out_cap, "error: exec denied (%s)",
-                       spg_executor_boundary_reason_to_string(plan.reason));
-        return;
-    }
+    const struct spg_policy_decision decision = {
+        .kind = SPG_POLICY_DECISION_ALLOW,
+    };
+    struct spg_mem_executor_result result = {};
+    recall[0] = '\0';
+    (void)spg_mem_executor_step(&state, &config, input_n, input, &rec, &decision,
+                                &ws, &result);
 
-    static char ob[EXEC_STDOUT_CAP];
-    static char eb[EXEC_STDERR_CAP];
-    ob[0] = '\0';
-    eb[0] = '\0';
-    const struct spg_cmd_request creq = {
-        .argc       = argc,
-        .argv       = argv,
-        .timeout_ms = EXEC_TIMEOUT_MS,
-        .stdout_cap = sizeof ob,
-        .stdout_buf = ob,
-        .stderr_cap = sizeof eb,
-        .stderr_buf = eb,
-    };
-    struct spg_cmd_result cres = {};
-    (void)spg_cmd_executor_run(1u, &creq, &cres);
-    if (!cres.started) {
-        (void)snprintf(out, out_cap, "error: cannot run %s", argv[0]);
+    if (kind == SPG_ACTION_MEMORY_READ) {
+        if (result.save_status == SPG_OK) {
+            (void)snprintf(out, out_cap, "%s", recall);
+        } else {
+            (void)snprintf(out, out_cap, "error: cannot read %s (%s)", slug,
+                           spg_status_to_string(result.save_status));
+        }
         return;
     }
-    (void)snprintf(out, out_cap, "exit %d%s%s%s%s", cres.exit_code,
-                   ob[0] != '\0' ? "\n" : "", ob,
-                   eb[0] != '\0' ? "\n[stderr] " : "", eb);
+    if (kind == SPG_ACTION_MEMORY_DELETE) {
+        (void)snprintf(out, out_cap,
+                       result.save_status == SPG_OK ? "deleted %s"
+                                                     : "error: cannot delete %s",
+                       slug);
+        return;
+    }
+    (void)snprintf(out, out_cap,
+                   result.save_status == SPG_OK
+                       ? "saved %s"
+                       : "error: cannot save (need slug, description, body)",
+                   slug);
 }
 
 enum spg_status spg_chat_tool_dispatch(struct spg_mem_store *store,
+                                       struct spg_journal_writer *journal,
                                        const bool allow_exec,
                                        const size_t input_n, const char *input,
                                        const size_t out_cap, char out[],
@@ -159,14 +235,6 @@ enum spg_status spg_chat_tool_dispatch(struct spg_mem_store *store,
     }
     *was_tool = true;
 
-    char slug[SPG_MEM_SLUG_MAX + 1u] = {0};
-    struct spg_text_span slug_span;
-    const bool has_slug =
-        arg_string(input_n, input, nodes, 0u, "slug", &slug_span);
-    if (has_slug) {
-        span_to_buf(input, slug_span, slug, sizeof slug);
-    }
-
     if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span,
                                "memory_list")) {
         (void)spg_mem_index(store, out_cap, out, nullptr, nullptr);
@@ -177,54 +245,24 @@ enum spg_status spg_chat_tool_dispatch(struct spg_mem_store *store,
     }
     if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span,
                                "memory_read")) {
-        if (!has_slug) {
-            (void)snprintf(out, out_cap, "error: memory_read needs a slug");
-            return SPG_OK;
-        }
-        const enum spg_status s =
-            spg_mem_read(store, slug, out_cap, out, nullptr);
-        if (s != SPG_OK) {
-            (void)snprintf(out, out_cap, "error: cannot read %s (%s)", slug,
-                           spg_status_to_string(s));
-        }
+        run_memory(store, journal, SPG_ACTION_MEMORY_READ, input_n, input, nodes,
+                   out, out_cap);
         return SPG_OK;
     }
     if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span,
                                "memory_delete")) {
-        const enum spg_status s = has_slug ? spg_mem_delete(store, slug)
-                                           : SPG_E_INVALID_ARG;
-        (void)snprintf(out, out_cap,
-                       s == SPG_OK ? "deleted %s" : "error: cannot delete %s",
-                       slug);
+        run_memory(store, journal, SPG_ACTION_MEMORY_DELETE, input_n, input,
+                   nodes, out, out_cap);
         return SPG_OK;
     }
     if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span,
                                "memory_save")) {
-        char desc[SPG_MEM_DESC_MAX + 1u] = {0};
-        static char           body[SPG_MEM_BODY_MAX + 1u];
-        struct spg_text_span  dspan;
-        struct spg_text_span  bspan;
-        body[0] = '\0';
-        const bool ok = has_slug &&
-                        arg_string(input_n, input, nodes, 0u, "description",
-                                   &dspan) &&
-                        arg_string(input_n, input, nodes, 0u, "body", &bspan);
-        if (ok) {
-            span_to_buf(input, dspan, desc, sizeof desc);
-            span_to_buf(input, bspan, body, sizeof body);
-        }
-        const enum spg_status s =
-            ok ? spg_mem_save(store, slug, desc, body) : SPG_E_INVALID_ARG;
-        (void)snprintf(out, out_cap,
-                       s == SPG_OK ? "saved %s"
-                                   : "error: cannot save (need slug, "
-                                     "description, body)",
-                       slug);
+        run_memory(store, journal, SPG_ACTION_MEMORY_SAVE, input_n, input, nodes,
+                   out, out_cap);
         return SPG_OK;
     }
-
     if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span, "exec")) {
-        run_exec(input, nodes, allow_exec, out, out_cap, input_n);
+        run_exec(input_n, input, nodes, allow_exec, journal, out, out_cap);
         return SPG_OK;
     }
 
