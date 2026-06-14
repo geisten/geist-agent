@@ -7,6 +7,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -70,9 +71,17 @@ static bool is_memory_file(const char *name) {
     return strcmp(name, "MEMORY.md") != 0;
 }
 
-/* Read "description:" from a file's frontmatter into out (always terminated). */
-static void read_description(const char *path, char *out, const size_t cap) {
-    out[0] = '\0';
+/* Read "description:" and "updated:" from a file's frontmatter. out is always
+ * terminated; *updated defaults to 0 when absent. Either out or updated may be
+ * null. */
+static void read_meta(const char *path, char *out, const size_t cap,
+                      uint64_t *updated) {
+    if (out != nullptr) {
+        out[0] = '\0';
+    }
+    if (updated != nullptr) {
+        *updated = 0u;
+    }
     FILE *f = fopen(path, "rb");
     if (f == nullptr) {
         return;
@@ -91,16 +100,28 @@ static void read_description(const char *path, char *out, const size_t cap) {
             }
             break;
         }
-        if (in_fm && strncmp(line, "description:", 12u) == 0) {
+        if (!in_fm) {
+            continue;
+        }
+        if (out != nullptr && strncmp(line, "description:", 12u) == 0) {
             const char *v = line + 12u;
             while (*v == ' ') {
                 v += 1u;
             }
-            const size_t vn = strlen(v);
+            const size_t vn   = strlen(v);
             const size_t take = vn + 1u > cap ? cap - 1u : vn;
             memcpy(out, v, take);
             out[take] = '\0';
-            break;
+        } else if (updated != nullptr && strncmp(line, "updated:", 8u) == 0) {
+            const char *v = line + 8u;
+            while (*v == ' ') {
+                v += 1u;
+            }
+            uint64_t n = 0u;
+            for (size_t i = 0u; v[i] >= '0' && v[i] <= '9'; i += 1u) {
+                n = n * 10u + (uint64_t)(v[i] - '0');
+            }
+            *updated = n;
         }
     }
     (void)fclose(f);
@@ -139,6 +160,89 @@ static size_t collect_sorted(const struct spg_mem_store *store,
     return count;
 }
 
+struct mem_entry {
+    char     slug[SLUGBUF];
+    uint64_t updated;
+};
+
+/* Recency order: higher "updated" first, slug ascending as a stable tiebreak. */
+static bool entry_before(const struct mem_entry *a, const struct mem_entry *b) {
+    if (a->updated != b->updated) {
+        return a->updated > b->updated;
+    }
+    return strcmp(a->slug, b->slug) < 0;
+}
+
+/* Collect memories sorted most-recently-updated first. */
+static size_t collect_by_recency(const struct spg_mem_store *store,
+                                 struct mem_entry entries[], const size_t max) {
+    DIR *d = opendir(store->dir);
+    if (d == nullptr) {
+        return 0u;
+    }
+    size_t         count = 0u;
+    struct dirent *e;
+    while ((e = readdir(d)) != nullptr && count < max) {
+        if (!is_memory_file(e->d_name)) {
+            continue;
+        }
+        const size_t nm = strlen(e->d_name) - 3u;
+        if (nm + 1u > SLUGBUF) {
+            continue;
+        }
+        struct mem_entry entry = {};
+        memcpy(entry.slug, e->d_name, nm);
+        entry.slug[nm] = '\0';
+        char path[SPG_MEM_PATH_MAX];
+        if (build_path(store, entry.slug, ".md", path, sizeof path) != SPG_OK) {
+            continue;
+        }
+        read_meta(path, nullptr, 0u, &entry.updated);
+        size_t pos = count;
+        while (pos > 0u && entry_before(&entry, &entries[pos - 1u])) {
+            entries[pos] = entries[pos - 1u];
+            pos -= 1u;
+        }
+        entries[pos] = entry;
+        count += 1u;
+    }
+    (void)closedir(d);
+    return count;
+}
+
+/* Highest "updated" counter currently in the store (0 when empty). */
+static uint64_t max_updated(const struct spg_mem_store *store) {
+    DIR *d = opendir(store->dir);
+    if (d == nullptr) {
+        return 0u;
+    }
+    uint64_t       mx = 0u;
+    struct dirent *e;
+    while ((e = readdir(d)) != nullptr) {
+        if (!is_memory_file(e->d_name)) {
+            continue;
+        }
+        const size_t nm = strlen(e->d_name) - 3u;
+        if (nm + 1u > SLUGBUF) {
+            continue;
+        }
+        char slug[SLUGBUF];
+        memcpy(slug, e->d_name, nm);
+        slug[nm] = '\0';
+        char path[SPG_MEM_PATH_MAX];
+        if (build_path(store, slug, ".md", path, sizeof path) != SPG_OK) {
+            continue;
+        }
+        uint64_t u = 0u;
+        read_meta(path, nullptr, 0u, &u);
+        if (u > mx) {
+            mx = u;
+        }
+    }
+    (void)closedir(d);
+    return mx;
+}
+
 static size_t count_memories(const struct spg_mem_store *store) {
     DIR *d = opendir(store->dir);
     if (d == nullptr) {
@@ -167,16 +271,17 @@ static void regenerate_index(const struct spg_mem_store *store) {
     if (f == nullptr) {
         return;
     }
-    static char slugs[SPG_MEM_MAX_FILES][SLUGBUF];
-    const size_t count = collect_sorted(store, slugs, SPG_MEM_MAX_FILES);
+    static struct mem_entry entries[SPG_MEM_MAX_FILES];
+    const size_t count = collect_by_recency(store, entries, SPG_MEM_MAX_FILES);
     for (size_t i = 0u; i < count; i += 1u) {
         char path[SPG_MEM_PATH_MAX];
         char desc[SPG_MEM_DESC_MAX + 1u];
-        if (build_path(store, slugs[i], ".md", path, sizeof path) != SPG_OK) {
+        if (build_path(store, entries[i].slug, ".md", path, sizeof path) !=
+            SPG_OK) {
             continue;
         }
-        read_description(path, desc, sizeof desc);
-        (void)fprintf(f, "- %s: %s\n", slugs[i], desc);
+        read_meta(path, desc, sizeof desc, nullptr);
+        (void)fprintf(f, "- %s: %s\n", entries[i].slug, desc);
     }
     if (fclose(f) == 0) {
         (void)rename(tmp, dst);
@@ -208,12 +313,17 @@ enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
         return SPG_E_LIMIT;
     }
 
+    /* A re-save bumps the slug above every existing memory, so the index ranks
+     * it most-recent. */
+    const uint64_t updated = max_updated(store) + 1u;
+
     FILE *f = fopen(tmp, "wb");
     if (f == nullptr) {
         return SPG_E_IO;
     }
-    const int w = fprintf(f, "---\nname: %s\ndescription: %s\n---\n%s", slug,
-                          description, body);
+    const int w =
+        fprintf(f, "---\nname: %s\ndescription: %s\nupdated: %llu\n---\n%s", slug,
+                description, (unsigned long long)updated, body);
     const bool body_nl = body[0] == '\0' || body[strlen(body) - 1u] == '\n';
     if (w >= 0 && !body_nl) {
         (void)fputc('\n', f);
@@ -294,8 +404,8 @@ enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
     if (store == nullptr || dst == nullptr || dst_cap == 0u) {
         return SPG_E_INVALID_ARG;
     }
-    static char  slugs[SPG_MEM_MAX_FILES][SLUGBUF];
-    const size_t count = collect_sorted(store, slugs, SPG_MEM_MAX_FILES);
+    static struct mem_entry entries[SPG_MEM_MAX_FILES];
+    const size_t count = collect_by_recency(store, entries, SPG_MEM_MAX_FILES);
 
     dst[0]              = '\0';
     size_t used         = 0u;
@@ -308,12 +418,13 @@ enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
         char path[SPG_MEM_PATH_MAX];
         char desc[SPG_MEM_DESC_MAX + 1u];
         char line[SPG_MEM_SLUG_MAX + SPG_MEM_DESC_MAX + 8u];
-        if (build_path(store, slugs[i], ".md", path, sizeof path) != SPG_OK) {
+        if (build_path(store, entries[i].slug, ".md", path, sizeof path) !=
+            SPG_OK) {
             continue;
         }
-        read_description(path, desc, sizeof desc);
+        read_meta(path, desc, sizeof desc, nullptr);
         const int ln =
-            snprintf(line, sizeof line, "- %s: %s\n", slugs[i], desc);
+            snprintf(line, sizeof line, "- %s: %s\n", entries[i].slug, desc);
         if (ln < 0) {
             continue;
         }

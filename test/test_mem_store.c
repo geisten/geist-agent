@@ -112,8 +112,10 @@ static int test_index(void) {
     if (open_temp(&store, dir) != 0) {
         return 1;
     }
-    if (spg_mem_save(&store, "bbb", "second hook", "x") != SPG_OK ||
-        spg_mem_save(&store, "aaa", "first hook", "y") != SPG_OK) {
+    /* Save aaa first, then bbb: recency ranking must list bbb (newer) before
+     * aaa, which differs from alphabetical order. */
+    if (spg_mem_save(&store, "aaa", "older hook", "x") != SPG_OK ||
+        spg_mem_save(&store, "bbb", "newer hook", "y") != SPG_OK) {
         return 1;
     }
     char   idx[512];
@@ -123,11 +125,19 @@ static int test_index(void) {
         SPG_OK) {
         return 1;
     }
-    /* Slug-sorted: aaa before bbb; descriptions present; no truncation. */
-    const char *a = strstr(idx, "- aaa: first hook");
-    const char *b = strstr(idx, "- bbb: second hook");
-    if (a == nullptr || b == nullptr || a > b || truncated) {
+    const char *a = strstr(idx, "- aaa: older hook");
+    const char *b = strstr(idx, "- bbb: newer hook");
+    if (a == nullptr || b == nullptr || b > a || truncated) {
+        return 1; /* bbb (newer) must come before aaa */
+    }
+    /* Re-saving aaa bumps it to the most recent, so it leads now. */
+    if (spg_mem_save(&store, "aaa", "older hook", "x2") != SPG_OK ||
+        spg_mem_index(&store, sizeof idx, idx, &required, &truncated) !=
+            SPG_OK) {
         return 1;
+    }
+    if (strstr(idx, "- aaa:") > strstr(idx, "- bbb:")) {
+        return 1; /* aaa now first after the re-save */
     }
     return required == strlen(idx) ? 0 : 1;
 }
