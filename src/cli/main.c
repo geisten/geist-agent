@@ -1,6 +1,7 @@
 #include "sporegeist/sporegeist.h"
 
 #include "sporegeist/exec_command.h"
+#include "sporegeist/mem_command.h"
 
 #include <geist.h>
 
@@ -41,6 +42,7 @@ static void print_usage(const char *argv0) {
             "commands:\n"
             "  version          print sporegeist and libgeist versions\n"
             "  exec             run a guarded local command and capture output\n"
+            "  memory           store/recall Markdown long-term memories\n"
             "  tick             run one fake-model orchestrator tick\n"
             "  run              run fake-model orchestrator ticks\n"
             "  replay           print a journal timeline as JSONL\n"
@@ -1662,6 +1664,10 @@ int main(int argc, char **argv) {
             return 2;
         }
         return spg_exec_command(argc - 2, argv + 2);
+    }
+
+    if (strcmp(argv[1], "memory") == 0) {
+        return spg_memory_command(argc - 2, argv + 2);
     }
 
     if (strcmp(argv[1], "tick") == 0) {

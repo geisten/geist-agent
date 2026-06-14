@@ -1,6 +1,7 @@
 #include "sporegeist/sporegeist.h"
 
 #include "sporegeist/chat_template.h"
+#include "sporegeist/mem_store.h"
 #include "sporegeist/model_adapter.h"
 #include "sporegeist/model_resolve.h"
 #include "sporegeist/status.h"
@@ -26,7 +27,7 @@
 static void print_usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s [--model <path>] [--max-tokens <n>] [--no-download] "
-            "[--fake] [--transcript <path>]\n"
+            "[--fake] [--transcript <path>] [--memory-dir <path>]\n"
             "\n"
             "Interactive sporegeist chat REPL.\n"
             "Connects to a Gemma 4 GGUF via the geist engine. The model path is\n"
@@ -105,6 +106,7 @@ static void trim_at_stop_markers(char *text) {
 struct chat_args {
     const char *model_path;
     const char *transcript_path;
+    const char *memory_dir;
     size_t      max_tokens;
     bool        allow_download;
     bool        fake;
@@ -141,6 +143,10 @@ static int parse_args(int argc, char **argv, struct chat_args *out) {
         }
         if (strcmp(argv[i], "--transcript") == 0 && i + 1 < argc) {
             out->transcript_path = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
+            out->memory_dir = argv[++i];
             continue;
         }
         if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc) {
@@ -213,6 +219,124 @@ static enum spg_status init_adapter(const struct chat_args   *args,
     return istatus;
 }
 
+static const char *resolve_mem_dir(const struct chat_args *args) {
+    if (args->memory_dir != nullptr && args->memory_dir[0] != '\0') {
+        return args->memory_dir;
+    }
+    const char *env = getenv("SPOREGEIST_MEMORY_DIR");
+    if (env != nullptr && env[0] != '\0') {
+        return env;
+    }
+    return "memory";
+}
+
+/* Read the first whitespace-delimited token of s into tok; *rest points at the
+ * remainder (leading spaces skipped). */
+static void split_first(const char *s, char *tok, size_t tok_cap,
+                        const char **rest) {
+    while (*s == ' ') {
+        s += 1;
+    }
+    size_t i = 0u;
+    while (s[i] != '\0' && s[i] != ' ' && i + 1u < tok_cap) {
+        tok[i] = s[i];
+        i += 1u;
+    }
+    tok[i]      = '\0';
+    const char *r = s + i;
+    while (*r == ' ') {
+        r += 1;
+    }
+    *rest = r;
+}
+
+/* Handle the /memories, /recall, /remember, /forget slash-commands. Returns
+ * true when line was such a command (already handled). /recall stashes the
+ * memory text into pending for the next user message. */
+static bool handle_memory_command(struct spg_mem_store *mem, bool have_mem,
+                                  const char *line, const char *last_reply,
+                                  char *pending, size_t pending_cap) {
+    if (strcmp(line, "/memories") == 0) {
+        static char idx[4096];
+        bool        tr = false;
+        if (!have_mem) {
+            puts("assistant> (memory unavailable)");
+            return true;
+        }
+        (void)spg_mem_index(mem, sizeof idx, idx, nullptr, &tr);
+        if (idx[0] == '\0') {
+            puts("assistant> (no memories yet)");
+        } else {
+            printf("assistant> known memories:\n%s", idx);
+        }
+        return true;
+    }
+    if (strncmp(line, "/recall", 7) == 0 &&
+        (line[7] == ' ' || line[7] == '\0')) {
+        char        slug[SPG_MEM_SLUG_MAX + 1u];
+        const char *rest;
+        split_first(line + 7, slug, sizeof slug, &rest);
+        if (!have_mem || slug[0] == '\0') {
+            puts("assistant> usage: /recall <slug>");
+            return true;
+        }
+        static char content[SPG_MEM_BODY_MAX + 1024u];
+        const enum spg_status s =
+            spg_mem_read(mem, slug, sizeof content, content, nullptr);
+        if (s != SPG_OK) {
+            printf("assistant> (cannot recall %s: %s)\n", slug,
+                   spg_status_to_string(s));
+            return true;
+        }
+        (void)snprintf(pending, pending_cap, "[recalled memory %s]\n%s", slug,
+                       content);
+        printf("assistant> recalled %s (will use it in your next message)\n",
+               slug);
+        return true;
+    }
+    if (strncmp(line, "/remember", 9) == 0 &&
+        (line[9] == ' ' || line[9] == '\0')) {
+        char        slug[SPG_MEM_SLUG_MAX + 1u];
+        const char *desc;
+        split_first(line + 9, slug, sizeof slug, &desc);
+        if (!have_mem || slug[0] == '\0' || desc[0] == '\0') {
+            puts("assistant> usage: /remember <slug> <description>");
+            return true;
+        }
+        if (last_reply[0] == '\0') {
+            puts("assistant> (nothing to remember yet)");
+            return true;
+        }
+        const enum spg_status s = spg_mem_save(mem, slug, desc, last_reply);
+        if (s != SPG_OK) {
+            printf("assistant> (cannot remember %s: %s)\n", slug,
+                   spg_status_to_string(s));
+        } else {
+            printf("assistant> remembered %s\n", slug);
+        }
+        return true;
+    }
+    if (strncmp(line, "/forget", 7) == 0 &&
+        (line[7] == ' ' || line[7] == '\0')) {
+        char        slug[SPG_MEM_SLUG_MAX + 1u];
+        const char *rest;
+        split_first(line + 7, slug, sizeof slug, &rest);
+        if (!have_mem || slug[0] == '\0') {
+            puts("assistant> usage: /forget <slug>");
+            return true;
+        }
+        const enum spg_status s = spg_mem_delete(mem, slug);
+        if (s != SPG_OK) {
+            printf("assistant> (cannot forget %s: %s)\n", slug,
+                   spg_status_to_string(s));
+        } else {
+            printf("assistant> forgot %s\n", slug);
+        }
+        return true;
+    }
+    return false;
+}
+
 int main(int argc, char **argv) {
     struct chat_args args = {};
     const int        pa   = parse_args(argc, argv, &args);
@@ -228,6 +352,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    struct spg_mem_store mem;
+    bool                 have_mem = false;
+    if (!args.fake) {
+        have_mem = spg_mem_store_open(&mem, resolve_mem_dir(&args)) == SPG_OK;
+        if (!have_mem) {
+            fprintf(stderr, "sporegeist-chat: memory disabled (cannot open %s)\n",
+                    resolve_mem_dir(&args));
+        }
+    }
+
     FILE *transcript = nullptr;
     if (args.transcript_path != nullptr) {
         transcript = fopen(args.transcript_path, "ab");
@@ -238,10 +372,14 @@ int main(int argc, char **argv) {
         }
     }
 
-    puts("sporegeist-chat ready. Type /quit to exit, /reset to clear context.");
+    puts("sporegeist-chat ready. /quit, /reset, /memories, /recall <slug>, "
+         "/remember <slug> <desc>, /forget <slug>.");
     char                    line[CHAT_LINE_BYTES];
     char                    output[CHAT_OUTPUT_BYTES];
     char                    history_buf[CHAT_HISTORY_BYTES];
+    char                    last_reply[CHAT_OUTPUT_BYTES] = {0};
+    char                    pending[4096]                 = {0};
+    bool                    index_injected                = false;
     struct spg_chat_history history;
     spg_chat_history_init(&history, sizeof history_buf, history_buf);
     int rc = 0;
@@ -263,6 +401,11 @@ int main(int argc, char **argv) {
         if (line[0] == '\0') {
             continue;
         }
+        if (line[0] == '/' &&
+            handle_memory_command(&mem, have_mem, line, last_reply, pending,
+                                  sizeof pending)) {
+            continue;
+        }
         if (transcript_write(transcript, "user", line) != 0) {
             fprintf(stderr, "sporegeist-chat: transcript write failed\n");
             rc = 1;
@@ -270,11 +413,32 @@ int main(int argc, char **argv) {
         }
 
         /* Real path: feed the whole templated transcript each turn (reset +
-         * re-prefill). Fake path: just echo the raw line. */
+         * re-prefill), prepending the memory index (first turn) and any
+         * /recall'd content. Fake path: just echo the raw line. */
         const char *prompt = line;
         bool        reset  = false;
         if (!args.fake) {
-            if (spg_chat_history_add_user(&history, line) != SPG_OK) {
+            char composed[CHAT_HISTORY_BYTES];
+            composed[0] = '\0';
+            if (!index_injected && have_mem) {
+                static char idx[2048];
+                bool        tr = false;
+                (void)spg_mem_index(&mem, sizeof idx, idx, nullptr, &tr);
+                if (idx[0] != '\0') {
+                    (void)snprintf(composed, sizeof composed,
+                                   "[memory index]\n%s[/memory index]\n\n", idx);
+                }
+                index_injected = true;
+            }
+            if (pending[0] != '\0') {
+                const size_t o = strlen(composed);
+                (void)snprintf(composed + o, sizeof composed - o, "%s\n\n",
+                               pending);
+                pending[0] = '\0';
+            }
+            const size_t o = strlen(composed);
+            (void)snprintf(composed + o, sizeof composed - o, "%s", line);
+            if (spg_chat_history_add_user(&history, composed) != SPG_OK) {
                 puts("assistant> (message too long for the context window)");
                 continue;
             }
@@ -301,6 +465,7 @@ int main(int argc, char **argv) {
             if (!args.fake) {
                 trim_at_stop_markers(output);
                 (void)spg_chat_history_add_assistant(&history, output);
+                (void)snprintf(last_reply, sizeof last_reply, "%s", output);
             }
             printf("assistant> %s%s\n", reply,
                    result.output_truncated ? " …[truncated]" : "");

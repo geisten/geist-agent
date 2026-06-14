@@ -79,6 +79,8 @@ SPG_SOURCES := \
     src/executor/executor_boundary.c \
     src/graph/graph.c \
     src/journal/journal.c \
+    src/memory/mem_command.c \
+    src/memory/mem_store.c \
     src/memory/memory.c \
     src/model/model_adapter.c \
     src/model/model_resolve.c \
