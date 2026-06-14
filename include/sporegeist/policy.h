@@ -21,6 +21,10 @@ enum spg_action_kind {
     SPG_ACTION_MEMORY_SAVE,
     SPG_ACTION_MEMORY_DELETE,
     SPG_ACTION_MEMORY_READ,
+    /* Control action: the agent declares the task complete. Carries no
+     * capability and consumes no budget; the loop terminates on it and it never
+     * reaches the policy gate. */
+    SPG_ACTION_FINISH,
 };
 
 enum spg_policy_decision_kind {

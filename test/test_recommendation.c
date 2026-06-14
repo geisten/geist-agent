@@ -188,7 +188,62 @@ static int test_invalid_args(void) {
                : 1;
 }
 
+static int test_valid_finish(void) {
+    /* finish needs only kind + reason -- no capability/cost/network. */
+    const char text[] = "(recommend (kind finish) (reason \"task done\"))";
+    struct spg_recommendation       rec = {};
+    struct spg_recommendation_error err = {};
+    if (parse_text(text, &rec, &err) != SPG_OK) {
+        return 1;
+    }
+    return (rec.state == SPG_RECOMMENDATION_VALID &&
+            rec.action_kind == SPG_ACTION_FINISH && !rec.has_command &&
+            !rec.has_target && !rec.has_slug)
+               ? 0
+               : 1;
+}
+
+static int test_finish_with_command_rejected(void) {
+    /* finish must not carry side-effect fields. */
+    const char text[] =
+        "(recommend (kind finish) (reason \"x\") (command \"rm -rf /\"))";
+    struct spg_recommendation       rec = {};
+    struct spg_recommendation_error err = {};
+    if (parse_text(text, &rec, &err) != SPG_OK) {
+        return 1;
+    }
+    return (rec.state == SPG_RECOMMENDATION_REJECTED &&
+            rec.reject_reason == SPG_RECOMMENDATION_REJECT_KIND_MISMATCH)
+               ? 0
+               : 1;
+}
+
+static int test_finish_missing_reason_rejected(void) {
+    const char text[] = "(recommend (kind finish))";
+    struct spg_recommendation       rec = {};
+    struct spg_recommendation_error err = {};
+    if (parse_text(text, &rec, &err) != SPG_OK) {
+        return 1;
+    }
+    return (rec.state == SPG_RECOMMENDATION_REJECTED &&
+            rec.reject_reason == SPG_RECOMMENDATION_REJECT_MISSING_FIELD)
+               ? 0
+               : 1;
+}
+
 int main(void) {
+    if (test_valid_finish() != 0) {
+        fprintf(stderr, "test_valid_finish failed\n");
+        return 1;
+    }
+    if (test_finish_with_command_rejected() != 0) {
+        fprintf(stderr, "test_finish_with_command_rejected failed\n");
+        return 1;
+    }
+    if (test_finish_missing_reason_rejected() != 0) {
+        fprintf(stderr, "test_finish_missing_reason_rejected failed\n");
+        return 1;
+    }
     if (test_valid_simulator() != 0) {
         fprintf(stderr, "test_valid_simulator failed\n");
         return 1;

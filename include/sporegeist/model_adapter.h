@@ -28,6 +28,12 @@ struct spg_model_sampling {
     uint64_t random_seed;
 };
 
+/* One canned fake-model reply (a recommendation text). */
+struct spg_fake_response {
+    size_t      n;
+    const char *text;
+};
+
 struct spg_model_adapter_config {
     enum spg_model_adapter_kind kind;
 
@@ -37,8 +43,16 @@ struct spg_model_adapter_config {
 
     struct spg_model_sampling sampling;
 
+    /* Single canned reply (returned on every generate). */
     size_t      fake_response_n;
     const char *fake_response;
+
+    /* Scripted replies: the i-th generate returns fake_responses[i]; once
+     * exhausted the fake model "stops" (empty output, stopped_by_eos). Takes
+     * precedence over the single fake_response when count > 0. The array must
+     * outlive the adapter. */
+    size_t                          fake_response_count;
+    const struct spg_fake_response *fake_responses;
 };
 
 struct spg_model_adapter {
@@ -51,6 +65,10 @@ struct spg_model_adapter {
 
     size_t      fake_response_n;
     const char *fake_response;
+
+    size_t                          fake_response_count;
+    const struct spg_fake_response *fake_responses;
+    size_t                          fake_index; /* next scripted reply */
 };
 
 struct spg_model_generate_request {

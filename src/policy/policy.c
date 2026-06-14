@@ -107,6 +107,8 @@ const char *spg_action_kind_to_string(const enum spg_action_kind kind) {
         return "memory_delete";
     case SPG_ACTION_MEMORY_READ:
         return "memory_read";
+    case SPG_ACTION_FINISH:
+        return "finish";
     }
     return "unknown";
 }

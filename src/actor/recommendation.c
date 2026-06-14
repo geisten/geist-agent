@@ -124,10 +124,20 @@ static bool parse_action_kind(const size_t input_n, const char input[],
         *out = SPG_ACTION_MEMORY_READ;
         return true;
     }
+    if (spg_sexpr_span_eq_cstr(input_n, input, span, "finish")) {
+        *out = SPG_ACTION_FINISH;
+        return true;
+    }
     return false;
 }
 
-static bool required_fields_seen(const bool seen[static FIELD_COUNT]) {
+static bool required_fields_seen(const bool seen[static FIELD_COUNT],
+                                 const enum spg_action_kind kind) {
+    /* finish is a control action with no capability/cost/network/confidence;
+     * it needs only a kind and a reason. */
+    if (kind == SPG_ACTION_FINISH) {
+        return seen[FIELD_KIND] && seen[FIELD_REASON];
+    }
     return seen[FIELD_KIND] && seen[FIELD_CAPABILITY] && seen[FIELD_COST] &&
            seen[FIELD_USES_NETWORK] && seen[FIELD_CONFIDENCE_BP] &&
            seen[FIELD_REASON];
@@ -153,6 +163,10 @@ static bool kind_fields_match(const struct spg_recommendation *out) {
         return !out->action.uses_network && !out->has_command &&
                !out->has_target && out->has_slug && !out->has_description &&
                !out->has_body;
+    case SPG_ACTION_FINISH:
+        /* finish carries no side-effect fields. */
+        return !out->has_command && !out->has_target && !out->has_slug &&
+               !out->has_description && !out->has_body;
     }
     return false;
 }
@@ -381,7 +395,7 @@ enum spg_status spg_recommendation_parse(
         field = nodes[field].next_sibling;
     }
 
-    if (!required_fields_seen(seen)) {
+    if (!required_fields_seen(seen, rec.action_kind)) {
         reject(out, error, SPG_RECOMMENDATION_REJECT_MISSING_FIELD,
                SPG_E_SCHEMA, 0u, nodes[0].span.offset);
         return SPG_OK;

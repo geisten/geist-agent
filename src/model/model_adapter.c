@@ -96,13 +96,23 @@ static enum spg_status generate_fake(struct spg_model_adapter *adapter,
                                      const struct spg_model_generate_request *request,
                                      struct spg_model_generate_result *result) {
     (void)request;
-    const size_t n = adapter->fake_response_n;
+    const char *resp = adapter->fake_response;
+    size_t      n    = adapter->fake_response_n;
+    if (adapter->fake_responses != nullptr) {
+        if (adapter->fake_index >= adapter->fake_response_count) {
+            result->stopped_by_eos = true; /* script exhausted -> model stops */
+            return SPG_OK;
+        }
+        resp = adapter->fake_responses[adapter->fake_index].text;
+        n    = adapter->fake_responses[adapter->fake_index].n;
+        adapter->fake_index += 1u;
+    }
     if (n == 0u) {
         result->stopped_by_token_limit = true;
         return SPG_OK;
     }
     result->tokens_decoded = 1u;
-    return append_bytes(result, n, adapter->fake_response);
+    return append_bytes(result, n, resp);
 }
 
 static enum spg_status generate_geist(
@@ -163,9 +173,16 @@ spg_model_adapter_init(struct spg_model_adapter *adapter,
         if (config->fake_response_n > 0u && config->fake_response == nullptr) {
             return SPG_E_INVALID_ARG;
         }
-        adapter->fake_response_n = config->fake_response_n;
-        adapter->fake_response   = config->fake_response;
-        adapter->initialized     = true;
+        if (config->fake_response_count > 0u &&
+            config->fake_responses == nullptr) {
+            return SPG_E_INVALID_ARG;
+        }
+        adapter->fake_response_n     = config->fake_response_n;
+        adapter->fake_response       = config->fake_response;
+        adapter->fake_response_count = config->fake_response_count;
+        adapter->fake_responses      = config->fake_responses;
+        adapter->fake_index          = 0u;
+        adapter->initialized         = true;
         return SPG_OK;
     }
 
