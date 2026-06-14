@@ -65,6 +65,11 @@ struct spg_policy_decision {
 [[nodiscard]] const char *
 spg_policy_deny_reason_to_string(enum spg_policy_deny_reason reason);
 
+/* Canonical lowercase name of an action kind ("local_shell", "memory_save",
+ * ...). The single source of truth for the kind->name mapping; returns
+ * "unknown" for an out-of-range value. */
+[[nodiscard]] const char *spg_action_kind_to_string(enum spg_action_kind kind);
+
 #ifdef __cplusplus
 }
 #endif

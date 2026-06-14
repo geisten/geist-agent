@@ -23,21 +23,6 @@ static bool copy_span(size_t text_n, const char *text,
     return true;
 }
 
-static const char *op_name(const enum spg_action_kind kind) {
-    switch (kind) {
-    case SPG_ACTION_MEMORY_DELETE:
-        return "memory_delete";
-    case SPG_ACTION_MEMORY_READ:
-        return "memory_read";
-    case SPG_ACTION_LOCAL_SHELL:
-    case SPG_ACTION_SSH_AUTH_PROBE:
-    case SPG_ACTION_SIMULATOR:
-    case SPG_ACTION_MEMORY_SAVE:
-        break;
-    }
-    return "memory_save";
-}
-
 /* Journal one (memory_<op> (slug ...) [(bytes N)] (status ...)) event. */
 static enum spg_status journal_memory(
     struct spg_mem_executor_state *state,
@@ -106,13 +91,12 @@ enum spg_status spg_mem_executor_step(
     char slug[SPG_MEM_SLUG_MAX + 1u];
     if (!copy_span(text_n, text, recommendation->mem_slug, slug, sizeof slug)) {
         result->save_status = SPG_E_INVALID_ARG;
-        return journal_memory(state, config, op_name(kind), slug, false, 0u,
-                              workspace, result);
+        return journal_memory(state, config, spg_action_kind_to_string(kind),
+                              slug, false, 0u, workspace, result);
     }
 
     if (kind == SPG_ACTION_MEMORY_DELETE) {
         result->save_status = spg_mem_delete(state->store, slug);
-        result->saved       = result->save_status == SPG_OK;
         return journal_memory(state, config, "memory_delete", slug, false, 0u,
                               workspace, result);
     }
@@ -126,7 +110,6 @@ enum spg_status spg_mem_executor_step(
                 spg_mem_read(state->store, slug, workspace->recall_capacity,
                              workspace->recall, &result->read_len);
         }
-        result->saved = result->save_status == SPG_OK;
         return journal_memory(state, config, "memory_read", slug, true,
                               result->read_len, workspace, result);
     }
@@ -143,7 +126,6 @@ enum spg_status spg_mem_executor_step(
         result->save_status =
             spg_mem_save(state->store, slug, description, body);
     }
-    result->saved = result->save_status == SPG_OK;
     return journal_memory(state, config, "memory_save", slug, true,
                           strlen(body), workspace, result);
 }

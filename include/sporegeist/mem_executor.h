@@ -41,8 +41,8 @@ struct spg_mem_executor_workspace {
 };
 
 struct spg_mem_executor_result {
-    enum spg_status save_status; /* outcome of the store operation */
-    bool            saved;       /* the store op succeeded */
+    enum spg_status save_status; /* outcome of the store operation (SPG_OK on
+                                    success) */
     bool            was_read;    /* this was a memory_read */
     size_t          read_len;    /* bytes available for a read (full length) */
     uint64_t        memory_sequence;

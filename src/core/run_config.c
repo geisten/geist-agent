@@ -106,14 +106,9 @@ static enum spg_status string_value_span(
     struct spg_text_span *out) {
     const uint32_t value = spg_sexpr_second_child(nodes, field);
     if (value == SPG_SEXPR_INVALID_INDEX ||
-        nodes[value].kind != SPG_SEXPR_NODE_STRING ||
-        nodes[value].span.length < 2u) {
+        !spg_sexpr_string_payload_span(&nodes[value], out)) {
         return SPG_E_SCHEMA;
     }
-    *out = (struct spg_text_span){
-        .offset = nodes[value].span.offset + 1u,
-        .length = nodes[value].span.length - 2u,
-    };
     return SPG_OK;
 }
 

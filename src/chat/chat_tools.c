@@ -1,6 +1,7 @@
 #include "sporegeist/chat_tools.h"
 
 #include "sporegeist/cmd_executor.h"
+#include "sporegeist/executor_boundary.h"
 #include "sporegeist/sexpr.h"
 
 #include <stdint.h>
@@ -9,6 +10,11 @@
 
 #define TOOL_TOKENS 256u
 #define TOOL_NODES  256u
+
+#define EXEC_TIMEOUT_MS 5000u
+#define EXEC_STDOUT_CAP 4096u
+#define EXEC_STDERR_CAP 1024u
+#define EXEC_CMD_CAP    1024u
 
 /* Find a (argname "value") child under the tool form and return the value's
  * string-payload span (quotes stripped). */
@@ -29,9 +35,7 @@ static bool arg_string(size_t input_n, const char *input,
             continue;
         }
         if (spg_sexpr_span_eq_cstr(input_n, input, nodes[name].span, argname)) {
-            *out = (struct spg_text_span){.offset = nodes[val].span.offset + 1u,
-                                          .length = nodes[val].span.length - 2u};
-            return true;
+            return spg_sexpr_string_payload_span(&nodes[val], out);
         }
     }
     return false;
@@ -71,33 +75,76 @@ static size_t split_ws(char *s, const char *argv[], const size_t max) {
 static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
                      bool allow_exec, char out[], const size_t out_cap,
                      size_t input_n) {
-    if (!allow_exec) {
-        (void)snprintf(out, out_cap,
-                       "error: exec is disabled (start sporegeist-chat with "
-                       "--allow-exec)");
-        return;
-    }
     struct spg_text_span cspan;
     if (!arg_string(input_n, input, nodes, 0u, "command", &cspan)) {
         (void)snprintf(out, out_cap, "error: exec needs (command \"...\")");
         return;
     }
-    char cmd[1024];
+    char cmd[EXEC_CMD_CAP];
     span_to_buf(input, cspan, cmd, sizeof cmd);
-    const char *argv[SPG_CMD_MAX_ARGS];
+    const char  *argv[SPG_CMD_MAX_ARGS];
     const size_t argc = split_ws(cmd, argv, SPG_CMD_MAX_ARGS);
     if (argc == 0u) {
         (void)snprintf(out, out_cap, "error: empty command");
         return;
     }
-    static char ob[4096];
-    static char eb[1024];
+
+    /* Gate the run through the shared executor boundary -- the single place
+     * that decides whether a shell command may run -- rather than a bare flag,
+     * so the chat tool and the CLI exec command enforce the same contract. */
+    const struct spg_recommendation rec = {
+        .state       = SPG_RECOMMENDATION_VALID,
+        .action_kind = SPG_ACTION_LOCAL_SHELL,
+        .action      = {.kind = SPG_ACTION_LOCAL_SHELL, .uses_network = false},
+        .command     = {.offset = 0u, .length = strlen(argv[0])},
+        .has_command = true,
+    };
+    const struct spg_policy_decision decision = {
+        .kind             = SPG_POLICY_DECISION_ALLOW,
+        .deny_reason      = SPG_POLICY_DENY_NONE,
+        .capability_index = 0u,
+    };
+    const struct spg_executor_boundary_config bcfg = {
+        .execution_enabled      = allow_exec,
+        .allowed_workdir_prefix = "/",
+        .max_timeout_ms         = EXEC_TIMEOUT_MS,
+        .max_stdout_bytes       = EXEC_STDOUT_CAP,
+        .max_stderr_bytes       = EXEC_STDERR_CAP,
+        .require_clean_env      = false,
+    };
+    const struct spg_executor_boundary_request breq = {
+        .working_dir        = "/",
+        .timeout_ms         = EXEC_TIMEOUT_MS,
+        .stdout_limit_bytes = EXEC_STDOUT_CAP,
+        .stderr_limit_bytes = EXEC_STDERR_CAP,
+        .env_cleared        = false,
+    };
+    struct spg_executor_boundary_plan plan = {};
+    if (spg_executor_boundary_check(&bcfg, &rec, &decision, &breq, &plan) !=
+        SPG_OK) {
+        (void)snprintf(out, out_cap, "error: exec internal boundary error");
+        return;
+    }
+    if (!plan.approved) {
+        if (plan.reason == SPG_EXECUTOR_BOUNDARY_EXECUTION_DISABLED) {
+            (void)snprintf(out, out_cap,
+                           "error: exec is disabled (start sporegeist-chat "
+                           "with --allow-exec)");
+        } else {
+            (void)snprintf(out, out_cap, "error: exec denied (%s)",
+                           spg_executor_boundary_reason_to_string(plan.reason));
+        }
+        return;
+    }
+
+    static char ob[EXEC_STDOUT_CAP];
+    static char eb[EXEC_STDERR_CAP];
     ob[0] = '\0';
     eb[0] = '\0';
     const struct spg_cmd_request creq = {
         .argc       = argc,
         .argv       = argv,
-        .timeout_ms = 5000u,
+        .timeout_ms = EXEC_TIMEOUT_MS,
         .stdout_cap = sizeof ob,
         .stdout_buf = ob,
         .stderr_cap = sizeof eb,

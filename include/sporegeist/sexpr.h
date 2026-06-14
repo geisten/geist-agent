@@ -94,6 +94,14 @@ spg_sexpr_first_child(const struct spg_sexpr_node nodes[static 1],
 spg_sexpr_second_child(const struct spg_sexpr_node nodes[static 1],
                        uint32_t node);
 
+/* Strip the surrounding quotes of a STRING node, returning its payload span in
+ * *out. False (out untouched) when node is null, not a STRING, or shorter than
+ * the two delimiting quotes. The single home for the (offset+1, length-2)
+ * quote-strip contract the recommendation/config/chat parsers all need. */
+[[nodiscard]] bool
+spg_sexpr_string_payload_span(const struct spg_sexpr_node *node,
+                              struct spg_text_span *out);
+
 /* Parse the decimal digits of span into *out, rejecting empty spans,
  * non-digits (SPG_E_FORMAT), and values past UINT64_MAX (SPG_E_OVERFLOW). */
 [[nodiscard]] enum spg_status

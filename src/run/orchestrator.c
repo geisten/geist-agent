@@ -70,6 +70,26 @@ const char *spg_orchestrator_stage_to_string(
     return "unknown";
 }
 
+bool spg_orchestrator_recommendation_valid(
+    const struct spg_orchestrator_result *result) {
+    return result->stage >= SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
+}
+
+bool spg_orchestrator_policy_evaluated(
+    const struct spg_orchestrator_result *result) {
+    return result->stage >= SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
+}
+
+bool spg_orchestrator_sim_executed(
+    const struct spg_orchestrator_result *result) {
+    return result->stage == SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED;
+}
+
+bool spg_orchestrator_memory_executed(
+    const struct spg_orchestrator_result *result) {
+    return result->stage == SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
+}
+
 enum spg_status spg_orchestrator_tick(
     struct spg_orchestrator_state *state,
     const struct spg_orchestrator_config *config,
@@ -133,9 +153,7 @@ enum spg_status spg_orchestrator_tick(
     if (status != SPG_OK) {
         return status;
     }
-    result->recommendation_valid =
-        result->recommendation.state == SPG_RECOMMENDATION_VALID;
-    if (!result->recommendation_valid) {
+    if (result->recommendation.state != SPG_RECOMMENDATION_VALID) {
         result->stage = SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED;
         return journal_recommendation_rejected(state, config, workspace, result);
     }
@@ -171,8 +189,7 @@ enum spg_status spg_orchestrator_tick(
     if (status != SPG_OK) {
         return status;
     }
-    result->policy_evaluated = true;
-    result->stage            = SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
+    result->stage = SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
 
     if (result->policy_gate.decision.kind != SPG_POLICY_DECISION_ALLOW) {
         return SPG_OK;
@@ -209,8 +226,7 @@ enum spg_status spg_orchestrator_tick(
         if (status != SPG_OK) {
             return status;
         }
-        result->memory_executed = true;
-        result->stage           = SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
+        result->stage = SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
         return SPG_OK;
     }
 
@@ -250,7 +266,6 @@ enum spg_status spg_orchestrator_tick(
     if (status != SPG_OK) {
         return status;
     }
-    result->sim_executed = true;
-    result->stage        = SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED;
+    result->stage = SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED;
     return SPG_OK;
 }

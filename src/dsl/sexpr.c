@@ -49,6 +49,19 @@ uint32_t spg_sexpr_second_child(const struct spg_sexpr_node nodes[static 1],
     return nodes[first].next_sibling;
 }
 
+bool spg_sexpr_string_payload_span(const struct spg_sexpr_node *node,
+                                   struct spg_text_span        *out) {
+    if (node == nullptr || out == nullptr ||
+        node->kind != SPG_SEXPR_NODE_STRING || node->span.length < 2u) {
+        return false;
+    }
+    *out = (struct spg_text_span){
+        .offset = node->span.offset + 1u,
+        .length = node->span.length - 2u,
+    };
+    return true;
+}
+
 enum spg_status spg_sexpr_parse_uint64_span(const size_t input_n,
                                             const char   input[],
                                             const struct spg_text_span span,

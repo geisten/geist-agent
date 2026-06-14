@@ -17,17 +17,6 @@ static void usage(void) {
             "  save reads the memory body from stdin\n");
 }
 
-static const char *resolve_dir(const char *flag) {
-    if (flag != nullptr && flag[0] != '\0') {
-        return flag;
-    }
-    const char *env = getenv("SPOREGEIST_MEMORY_DIR");
-    if (env != nullptr && env[0] != '\0') {
-        return env;
-    }
-    return "memory";
-}
-
 int spg_memory_command(const int argc, char **argv) {
     const char *dir_flag = nullptr;
     const char *pos[4]   = {nullptr, nullptr, nullptr, nullptr};
@@ -47,7 +36,7 @@ int spg_memory_command(const int argc, char **argv) {
     }
 
     struct spg_mem_store store;
-    if (spg_mem_store_open(&store, resolve_dir(dir_flag)) != SPG_OK) {
+    if (spg_mem_store_open(&store, spg_mem_resolve_dir(dir_flag)) != SPG_OK) {
         fprintf(stderr, "memory: cannot open store directory\n");
         return 1;
     }

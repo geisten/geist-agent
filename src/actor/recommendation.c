@@ -84,19 +84,6 @@ static enum field_id field_for_name(const size_t input_n, const char input[],
     return FIELD_UNKNOWN;
 }
 
-static bool string_payload_span(const struct spg_sexpr_node *node,
-                                struct spg_text_span *out) {
-    if (node == nullptr || out == nullptr ||
-        node->kind != SPG_SEXPR_NODE_STRING || node->span.length < 2u) {
-        return false;
-    }
-    *out = (struct spg_text_span){
-        .offset = node->span.offset + 1u,
-        .length = node->span.length - 2u,
-    };
-    return true;
-}
-
 static bool parse_bool_symbol(const size_t input_n, const char input[],
                               const struct spg_text_span span, bool *out) {
     if (spg_sexpr_span_eq_cstr(input_n, input, span, "true")) {
@@ -302,7 +289,7 @@ enum spg_status spg_recommendation_parse(
             }
             break;
         case FIELD_CAPABILITY:
-            if (!string_payload_span(value, &rec.capability)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.capability)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
@@ -338,14 +325,14 @@ enum spg_status spg_recommendation_parse(
             }
             break;
         case FIELD_REASON:
-            if (!string_payload_span(value, &rec.reason)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.reason)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
             }
             break;
         case FIELD_COMMAND:
-            if (!string_payload_span(value, &rec.command)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.command)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
@@ -353,7 +340,7 @@ enum spg_status spg_recommendation_parse(
             rec.has_command = true;
             break;
         case FIELD_TARGET:
-            if (!string_payload_span(value, &rec.target)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.target)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
@@ -361,7 +348,7 @@ enum spg_status spg_recommendation_parse(
             rec.has_target = true;
             break;
         case FIELD_SLUG:
-            if (!string_payload_span(value, &rec.mem_slug)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.mem_slug)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
@@ -369,7 +356,7 @@ enum spg_status spg_recommendation_parse(
             rec.has_slug = true;
             break;
         case FIELD_DESCRIPTION:
-            if (!string_payload_span(value, &rec.mem_description)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.mem_description)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;
@@ -377,7 +364,7 @@ enum spg_status spg_recommendation_parse(
             rec.has_description = true;
             break;
         case FIELD_BODY:
-            if (!string_payload_span(value, &rec.mem_body)) {
+            if (!spg_sexpr_string_payload_span(value, &rec.mem_body)) {
                 reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
                        SPG_E_SCHEMA, value_node, value->span.offset);
                 return SPG_OK;

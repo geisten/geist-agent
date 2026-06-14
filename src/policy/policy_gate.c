@@ -53,24 +53,6 @@ static const char *decision_kind_name(const enum spg_policy_decision_kind kind) 
     return "unknown";
 }
 
-static const char *action_kind_name(const enum spg_action_kind kind) {
-    switch (kind) {
-    case SPG_ACTION_LOCAL_SHELL:
-        return "local_shell";
-    case SPG_ACTION_SSH_AUTH_PROBE:
-        return "ssh_auth_probe";
-    case SPG_ACTION_SIMULATOR:
-        return "simulator";
-    case SPG_ACTION_MEMORY_SAVE:
-        return "memory_save";
-    case SPG_ACTION_MEMORY_DELETE:
-        return "memory_delete";
-    case SPG_ACTION_MEMORY_READ:
-        return "memory_read";
-    }
-    return "unknown";
-}
-
 static enum spg_status render_payload(
     const struct spg_recommendation *recommendation,
     const struct spg_policy_decision *decision,
@@ -98,7 +80,7 @@ static enum spg_status render_payload(
     }
     if (status == SPG_OK) {
         status = spg_sexpr_writer_append_text(
-            &writer, action_kind_name(recommendation->action_kind));
+            &writer, spg_action_kind_to_string(recommendation->action_kind));
     }
     if (status == SPG_OK) {
         status = spg_sexpr_writer_append_text(&writer, ") (cost ");

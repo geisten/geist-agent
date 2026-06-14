@@ -9,11 +9,23 @@
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
 #define SLUGBUF (SPG_MEM_SLUG_MAX + 1u)
 #define LINEBUF 1024u
+
+const char *spg_mem_resolve_dir(const char *flag) {
+    if (flag != nullptr && flag[0] != '\0') {
+        return flag;
+    }
+    const char *env = getenv("SPOREGEIST_MEMORY_DIR");
+    if (env != nullptr && env[0] != '\0') {
+        return env;
+    }
+    return "memory";
+}
 
 bool spg_mem_slug_valid(const char *slug) {
     if (slug == nullptr) {
@@ -162,6 +174,7 @@ static size_t collect_sorted(const struct spg_mem_store *store,
 
 struct mem_entry {
     char     slug[SLUGBUF];
+    char     desc[SPG_MEM_DESC_MAX + 1u]; /* frontmatter "description:" */
     uint64_t updated;
 };
 
@@ -197,7 +210,7 @@ static size_t collect_by_recency(const struct spg_mem_store *store,
         if (build_path(store, entry.slug, ".md", path, sizeof path) != SPG_OK) {
             continue;
         }
-        read_meta(path, nullptr, 0u, &entry.updated);
+        read_meta(path, entry.desc, sizeof entry.desc, &entry.updated);
         size_t pos = count;
         while (pos > 0u && entry_before(&entry, &entries[pos - 1u])) {
             entries[pos] = entries[pos - 1u];
@@ -274,14 +287,7 @@ static void regenerate_index(const struct spg_mem_store *store) {
     static struct mem_entry entries[SPG_MEM_MAX_FILES];
     const size_t count = collect_by_recency(store, entries, SPG_MEM_MAX_FILES);
     for (size_t i = 0u; i < count; i += 1u) {
-        char path[SPG_MEM_PATH_MAX];
-        char desc[SPG_MEM_DESC_MAX + 1u];
-        if (build_path(store, entries[i].slug, ".md", path, sizeof path) !=
-            SPG_OK) {
-            continue;
-        }
-        read_meta(path, desc, sizeof desc, nullptr);
-        (void)fprintf(f, "- %s: %s\n", entries[i].slug, desc);
+        (void)fprintf(f, "- %s: %s\n", entries[i].slug, entries[i].desc);
     }
     if (fclose(f) == 0) {
         (void)rename(tmp, dst);
@@ -415,16 +421,9 @@ enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
 
     const size_t shown = count < SPG_MEM_INDEX_TOPK ? count : SPG_MEM_INDEX_TOPK;
     for (size_t i = 0u; i < shown; i += 1u) {
-        char path[SPG_MEM_PATH_MAX];
-        char desc[SPG_MEM_DESC_MAX + 1u];
         char line[SPG_MEM_SLUG_MAX + SPG_MEM_DESC_MAX + 8u];
-        if (build_path(store, entries[i].slug, ".md", path, sizeof path) !=
-            SPG_OK) {
-            continue;
-        }
-        read_meta(path, desc, sizeof desc, nullptr);
-        const int ln =
-            snprintf(line, sizeof line, "- %s: %s\n", entries[i].slug, desc);
+        const int ln = snprintf(line, sizeof line, "- %s: %s\n",
+                                entries[i].slug, entries[i].desc);
         if (ln < 0) {
             continue;
         }

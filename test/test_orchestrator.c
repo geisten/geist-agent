@@ -145,8 +145,9 @@ static int test_simulator_tick_executes(void) {
         return 1;
     }
     if (result.stage != SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED ||
-        !result.recommendation_valid || !result.policy_evaluated ||
-        !result.sim_executed) {
+        !spg_orchestrator_recommendation_valid(&result) ||
+        !spg_orchestrator_policy_evaluated(&result) ||
+        !spg_orchestrator_sim_executed(&result)) {
         (void)spg_journal_writer_close(&writer);
         spg_model_adapter_destroy(&model);
         return 1;
@@ -235,7 +236,7 @@ static int test_local_shell_stops_after_policy(void) {
     spg_model_adapter_destroy(&model);
     if (result.stage != SPG_ORCHESTRATOR_STAGE_POLICY_GATED ||
         result.policy_gate.decision.kind != SPG_POLICY_DECISION_ALLOW ||
-        result.sim_executed) {
+        spg_orchestrator_sim_executed(&result)) {
         return 1;
     }
     return !sim.vulnerabilities[0u].patched ? 0 : 1;
@@ -288,7 +289,8 @@ static int test_rejected_recommendation_stops_before_policy(void) {
     }
     spg_model_adapter_destroy(&model);
     return result.stage == SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED &&
-                   !result.policy_evaluated && !result.sim_executed
+                   !spg_orchestrator_policy_evaluated(&result) &&
+                   !spg_orchestrator_sim_executed(&result)
                ? 0
                : 1;
 }
@@ -347,7 +349,7 @@ static int test_unknown_capability_denied_from_model_span(void) {
                        SPG_POLICY_DECISION_DENY &&
                    result.policy_gate.decision.deny_reason ==
                        SPG_POLICY_DENY_UNKNOWN_CAPABILITY &&
-                   !result.sim_executed
+                   !spg_orchestrator_sim_executed(&result)
                ? 0
                : 1;
 }

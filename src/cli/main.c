@@ -157,11 +157,6 @@ static const char *journal_event_kind_name(const uint32_t kind) {
     return "unknown";
 }
 
-static uint32_t replay_first_child(
-    const struct spg_sexpr_node nodes[static 1], const uint32_t node) {
-    return nodes[node].first_child;
-}
-
 static bool replay_span_eq_cstr(const size_t input_n, const char input[],
                                 const struct spg_text_span span,
                                 const char *expected) {
@@ -184,14 +179,14 @@ static bool replay_field_value(const size_t input_n, const char input[],
         return false;
     }
     const uint32_t form = 0u;
-    const uint32_t name = replay_first_child(nodes, form);
+    const uint32_t name = spg_sexpr_first_child(nodes, form);
     if (name == SPG_SEXPR_INVALID_INDEX ||
         !replay_span_eq_cstr(input_n, input, nodes[name].span, form_name)) {
         return false;
     }
     uint32_t field = nodes[name].next_sibling;
     while (field != SPG_SEXPR_INVALID_INDEX) {
-        const uint32_t field_name_node = replay_first_child(nodes, field);
+        const uint32_t field_name_node = spg_sexpr_first_child(nodes, field);
         if (field_name_node != SPG_SEXPR_INVALID_INDEX &&
             replay_span_eq_cstr(input_n, input, nodes[field_name_node].span,
                                 field_name)) {
@@ -582,24 +577,6 @@ static void print_risk_summary(const struct spg_risk_score *risk) {
     printf("risk.total=%llu\n", (unsigned long long)risk->total);
 }
 
-static const char *action_kind_name(const enum spg_action_kind kind) {
-    switch (kind) {
-    case SPG_ACTION_LOCAL_SHELL:
-        return "local_shell";
-    case SPG_ACTION_SSH_AUTH_PROBE:
-        return "ssh_auth_probe";
-    case SPG_ACTION_SIMULATOR:
-        return "simulator";
-    case SPG_ACTION_MEMORY_SAVE:
-        return "memory_save";
-    case SPG_ACTION_MEMORY_DELETE:
-        return "memory_delete";
-    case SPG_ACTION_MEMORY_READ:
-        return "memory_read";
-    }
-    return "unknown";
-}
-
 static bool parse_positive_size(const char *text, size_t *out) {
     if (text == nullptr || out == nullptr || text[0] == '\0') {
         return false;
@@ -667,11 +644,11 @@ static void update_run_usage(struct spg_policy_usage *usage,
     add_budget_u64(&usage->consumed.inference_steps, 1u);
     add_budget_u64(&usage->consumed.tokens,
                    (uint64_t)result->actor.tokens_decoded);
-    if (result->sim_executed) {
+    if (spg_orchestrator_sim_executed(result)) {
         add_budget_u64(&usage->consumed.sim_actions,
                        result->recommendation.action.cost);
     }
-    if (result->memory_executed) {
+    if (spg_orchestrator_memory_executed(result)) {
         add_budget_u64(&usage->consumed.memory_actions,
                        result->recommendation.action.cost);
     }
@@ -683,16 +660,16 @@ static void print_run_tick_summary(
     printf("tick=%zu", tick_index);
     printf(" stage=%s", spg_orchestrator_stage_to_string(result->stage));
     printf(" recommendation=%s",
-           result->recommendation_valid ? "valid" : "rejected");
-    if (!result->recommendation_valid) {
+           spg_orchestrator_recommendation_valid(result) ? "valid" : "rejected");
+    if (!spg_orchestrator_recommendation_valid(result)) {
         printf(" reject_reason=%s",
                spg_recommendation_reject_reason_to_string(
                    result->recommendation.reject_reason));
     } else {
         printf(" action=%s",
-               action_kind_name(result->recommendation.action_kind));
+               spg_action_kind_to_string(result->recommendation.action_kind));
     }
-    if (result->policy_evaluated) {
+    if (spg_orchestrator_policy_evaluated(result)) {
         printf(" policy=%s",
                result->policy_gate.decision.kind == SPG_POLICY_DECISION_ALLOW
                    ? "allow"
@@ -701,7 +678,7 @@ static void print_run_tick_summary(
                spg_policy_deny_reason_to_string(
                    result->policy_gate.decision.deny_reason));
     }
-    if (result->sim_executed) {
+    if (spg_orchestrator_sim_executed(result)) {
         printf(" sim_action=%s",
                spg_sim_exec_action_to_string(result->sim.action));
         printf(" risk_before=%llu",
@@ -1286,13 +1263,14 @@ static int run_tick_fake(const char *run_path, const char *fake_output) {
 
     printf("stage=%s\n", spg_orchestrator_stage_to_string(result.stage));
     printf("recommendation=%s\n",
-           result.recommendation_valid ? "valid" : "rejected");
-    if (!result.recommendation_valid) {
+           spg_orchestrator_recommendation_valid(&result) ? "valid"
+                                                          : "rejected");
+    if (!spg_orchestrator_recommendation_valid(&result)) {
         printf("reject_reason=%s\n",
                spg_recommendation_reject_reason_to_string(
                    result.recommendation.reject_reason));
     }
-    if (result.policy_evaluated) {
+    if (spg_orchestrator_policy_evaluated(&result)) {
         printf("policy=%s\n",
                result.policy_gate.decision.kind == SPG_POLICY_DECISION_ALLOW
                    ? "allow"
@@ -1301,7 +1279,7 @@ static int run_tick_fake(const char *run_path, const char *fake_output) {
                spg_policy_deny_reason_to_string(
                    result.policy_gate.decision.deny_reason));
     }
-    if (result.sim_executed) {
+    if (spg_orchestrator_sim_executed(&result)) {
         printf("sim_action=%s\n",
                spg_sim_exec_action_to_string(result.sim.action));
         printf("risk_before=%llu\n",

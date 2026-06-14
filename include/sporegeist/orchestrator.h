@@ -92,11 +92,6 @@ struct spg_orchestrator_result {
     struct spg_policy_gate_result    policy_gate;
     struct spg_sim_executor_result   sim;
     struct spg_mem_executor_result   memory;
-
-    bool recommendation_valid;
-    bool policy_evaluated;
-    bool sim_executed;
-    bool memory_executed;
 };
 
 [[nodiscard]] enum spg_status
@@ -107,6 +102,27 @@ spg_orchestrator_tick(struct spg_orchestrator_state *state,
 
 [[nodiscard]] const char *
 spg_orchestrator_stage_to_string(enum spg_orchestrator_stage stage);
+
+/* Derived views of a tick result. Each is a pure function of `stage`, the
+ * single source of truth for how far the tick advanced. */
+
+/* The model produced a structurally valid recommendation (the tick reached the
+ * policy gate). */
+[[nodiscard]] bool spg_orchestrator_recommendation_valid(
+    const struct spg_orchestrator_result *result);
+
+/* The policy gate ran. Same predicate as recommendation_valid: the gate runs
+ * exactly when the recommendation is valid. */
+[[nodiscard]] bool spg_orchestrator_policy_evaluated(
+    const struct spg_orchestrator_result *result);
+
+/* The simulator executed this tick. */
+[[nodiscard]] bool
+spg_orchestrator_sim_executed(const struct spg_orchestrator_result *result);
+
+/* A memory action executed this tick. */
+[[nodiscard]] bool
+spg_orchestrator_memory_executed(const struct spg_orchestrator_result *result);
 
 #ifdef __cplusplus
 }

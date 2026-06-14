@@ -70,7 +70,7 @@ static int test_save_writes_file(void) {
         SPG_OK) {
         return 1;
     }
-    if (!res.saved || res.save_status != SPG_OK) {
+    if (res.save_status != SPG_OK) {
         return 1;
     }
     char out[256];
@@ -100,7 +100,7 @@ static int test_bad_slug_recorded(void) {
         SPG_OK) {
         return 1;
     }
-    return (!res.saved && res.save_status == SPG_E_INVALID_ARG) ? 0 : 1;
+    return (res.save_status == SPG_E_INVALID_ARG) ? 0 : 1;
 }
 
 static int test_deny_rejected(void) {
@@ -146,8 +146,9 @@ static int test_delete_removes(void) {
         return 1;
     }
     char out[64];
-    return (res.saved && spg_mem_read(&store, "gone", sizeof out, out,
-                                      nullptr) == SPG_E_NOT_FOUND)
+    return (res.save_status == SPG_OK &&
+            spg_mem_read(&store, "gone", sizeof out, out, nullptr) ==
+                SPG_E_NOT_FOUND)
                ? 0
                : 1;
 }
@@ -170,7 +171,7 @@ static int test_read_recalls(void) {
         return 1;
     }
     /* The recall buffer holds the file content (body included). */
-    return (res.was_read && res.saved &&
+    return (res.was_read && res.save_status == SPG_OK &&
             strstr(g_recall, "remembered text") != nullptr)
                ? 0
                : 1;

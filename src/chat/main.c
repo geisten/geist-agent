@@ -228,14 +228,7 @@ static enum spg_status init_adapter(const struct chat_args   *args,
 }
 
 static const char *resolve_mem_dir(const struct chat_args *args) {
-    if (args->memory_dir != nullptr && args->memory_dir[0] != '\0') {
-        return args->memory_dir;
-    }
-    const char *env = getenv("SPOREGEIST_MEMORY_DIR");
-    if (env != nullptr && env[0] != '\0') {
-        return env;
-    }
-    return "memory";
+    return spg_mem_resolve_dir(args->memory_dir);
 }
 
 /* Read the first whitespace-delimited token of s into tok; *rest points at the

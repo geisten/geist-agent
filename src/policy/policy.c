@@ -93,6 +93,24 @@ static bool would_exceed(const uint64_t used, const uint64_t cost,
     return used + cost > budget;
 }
 
+const char *spg_action_kind_to_string(const enum spg_action_kind kind) {
+    switch (kind) {
+    case SPG_ACTION_LOCAL_SHELL:
+        return "local_shell";
+    case SPG_ACTION_SSH_AUTH_PROBE:
+        return "ssh_auth_probe";
+    case SPG_ACTION_SIMULATOR:
+        return "simulator";
+    case SPG_ACTION_MEMORY_SAVE:
+        return "memory_save";
+    case SPG_ACTION_MEMORY_DELETE:
+        return "memory_delete";
+    case SPG_ACTION_MEMORY_READ:
+        return "memory_read";
+    }
+    return "unknown";
+}
+
 const char *spg_policy_deny_reason_to_string(
     const enum spg_policy_deny_reason reason) {
     switch (reason) {

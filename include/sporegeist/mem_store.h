@@ -35,6 +35,11 @@ struct spg_mem_store {
 [[nodiscard]] enum spg_status spg_mem_store_open(struct spg_mem_store *store,
                                                  const char           *dir);
 
+/* Resolve a memory directory: an explicit flag (when non-null/non-empty) wins,
+ * else $SPOREGEIST_MEMORY_DIR, else the "memory" default. The shared policy for
+ * CLI/chat surfaces that default a store; never returns null. */
+[[nodiscard]] const char *spg_mem_resolve_dir(const char *flag);
+
 /* True when slug is a safe identifier: 1..SPG_MEM_SLUG_MAX bytes of [a-z0-9-]
  * only (no path separators, dots, uppercase). All file paths are built from a
  * validated slug, never from raw model input. */
