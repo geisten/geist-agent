@@ -14,6 +14,32 @@ static bool workspace_valid(const struct spg_orchestrator_workspace *workspace) 
     return true;
 }
 
+static enum spg_status journal_finish(
+    struct spg_orchestrator_state *state,
+    const struct spg_orchestrator_config *config,
+    const struct spg_orchestrator_workspace *workspace,
+    const struct spg_orchestrator_result *result) {
+    if (!config->write_journal) {
+        return SPG_OK;
+    }
+    if (state->journal == nullptr) {
+        return SPG_E_INVALID_ARG;
+    }
+    struct spg_sexpr_writer writer;
+    spg_sexpr_writer_init(&writer, workspace->policy_payload_capacity,
+                          workspace->policy_payload);
+    (void)spg_sexpr_writer_append_text(&writer, "(finish)");
+    const uint64_t parent_sequence =
+        result->actor.model_output_sequence != 0u
+            ? result->actor.model_output_sequence
+            : config->parent_sequence;
+    uint64_t sequence = 0u;
+    return spg_journal_writer_append(
+        state->journal, config->timestamp_ns, parent_sequence,
+        SPG_JOURNAL_EVENT_RESULT, SPG_OK, writer.used,
+        (const uint8_t *)workspace->policy_payload, &sequence);
+}
+
 static enum spg_status journal_recommendation_rejected(
     struct spg_orchestrator_state *state,
     const struct spg_orchestrator_config *config,
@@ -60,19 +86,25 @@ const char *spg_orchestrator_stage_to_string(
         return "actor_done";
     case SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED:
         return "recommendation_rejected";
+    case SPG_ORCHESTRATOR_STAGE_FINISHED:
+        return "finished";
     case SPG_ORCHESTRATOR_STAGE_POLICY_GATED:
         return "policy_gated";
     case SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED:
         return "sim_executed";
     case SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED:
         return "memory_executed";
+    case SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED:
+        return "shell_executed";
     }
     return "unknown";
 }
 
-/* The derived predicates below treat `stage` as a progress counter: a tick is
- * "valid"/"gated" once it reaches POLICY_GATED, so every pre-gate or rejected
- * stage must sort below it and every executed stage at or above it. Pin that
+/* The derived predicates treat `stage` as a progress counter. `policy_evaluated`
+ * is "the gate ran" = stage >= POLICY_GATED, so every pre-gate stage (incl. the
+ * terminal RECOMMENDATION_REJECTED and FINISHED) must sort below POLICY_GATED
+ * and every executed stage at or above it. `recommendation_valid` additionally
+ * counts FINISHED (a valid recommendation that bypasses the gate). Pin the
  * ordering so a future reorder cannot silently flip the predicates. */
 static_assert(SPG_ORCHESTRATOR_STAGE_NOT_STARTED <
                       SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
@@ -80,16 +112,21 @@ static_assert(SPG_ORCHESTRATOR_STAGE_NOT_STARTED <
                       SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
                   SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED <
                       SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
+                  SPG_ORCHESTRATOR_STAGE_FINISHED <
+                      SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
                   SPG_ORCHESTRATOR_STAGE_POLICY_GATED <=
                       SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED &&
                   SPG_ORCHESTRATOR_STAGE_POLICY_GATED <=
-                      SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED,
-              "orchestrator stage ordering: pre-gate/rejected stages must sort "
-              "below POLICY_GATED and executed stages at or above it");
+                      SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED &&
+                  SPG_ORCHESTRATOR_STAGE_POLICY_GATED <=
+                      SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED,
+              "orchestrator stage ordering: pre-gate/rejected/finished stages "
+              "must sort below POLICY_GATED and executed stages at or above it");
 
 bool spg_orchestrator_recommendation_valid(
     const struct spg_orchestrator_result *result) {
-    return result->stage >= SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
+    return result->stage == SPG_ORCHESTRATOR_STAGE_FINISHED ||
+           result->stage >= SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
 }
 
 bool spg_orchestrator_policy_evaluated(
@@ -105,6 +142,15 @@ bool spg_orchestrator_sim_executed(
 bool spg_orchestrator_memory_executed(
     const struct spg_orchestrator_result *result) {
     return result->stage == SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
+}
+
+bool spg_orchestrator_shell_executed(
+    const struct spg_orchestrator_result *result) {
+    return result->stage == SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED;
+}
+
+bool spg_orchestrator_finished(const struct spg_orchestrator_result *result) {
+    return result->stage == SPG_ORCHESTRATOR_STAGE_FINISHED;
 }
 
 enum spg_status spg_orchestrator_tick(
@@ -173,6 +219,11 @@ enum spg_status spg_orchestrator_tick(
     if (result->recommendation.state != SPG_RECOMMENDATION_VALID) {
         result->stage = SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED;
         return journal_recommendation_rejected(state, config, workspace, result);
+    }
+    if (result->recommendation.action_kind == SPG_ACTION_FINISH) {
+        /* Control action: terminate the loop without a policy gate or executor. */
+        result->stage = SPG_ORCHESTRATOR_STAGE_FINISHED;
+        return journal_finish(state, config, workspace, result);
     }
 
     const struct spg_policy_gate_workspace policy_workspace = {
@@ -244,6 +295,50 @@ enum spg_status spg_orchestrator_tick(
             return status;
         }
         result->stage = SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
+        return SPG_OK;
+    }
+
+    if (result->recommendation.action_kind == SPG_ACTION_LOCAL_SHELL) {
+        if (workspace->memory_recall_buf == nullptr ||
+            workspace->shell_stdout_buf == nullptr ||
+            workspace->shell_stderr_buf == nullptr) {
+            return SPG_E_INVALID_ARG;
+        }
+        struct spg_shell_executor_state shell_state = {
+            .journal = state->journal,
+        };
+        const struct spg_shell_executor_config shell_config = {
+            .actor_id               = config->actor_id,
+            .timestamp_ns           = config->timestamp_ns,
+            .parent_sequence        = result->policy_gate.policy_sequence != 0u
+                                          ? result->policy_gate.policy_sequence
+                                          : policy_config.parent_sequence,
+            .write_journal          = config->write_journal,
+            .execution_enabled      = config->execution_enabled,
+            .working_dir            = config->exec_working_dir,
+            .allowed_workdir_prefix = config->exec_workdir_prefix,
+            .timeout_ms             = config->exec_timeout_ms,
+            .max_stdout_bytes       = config->exec_stdout_cap,
+            .max_stderr_bytes       = config->exec_stderr_cap,
+        };
+        const struct spg_shell_executor_workspace shell_workspace = {
+            .payload_capacity     = workspace->sim_payload_capacity,
+            .payload              = workspace->sim_payload,
+            .observation_capacity = workspace->memory_recall_capacity,
+            .observation          = workspace->memory_recall_buf,
+            .stdout_capacity      = workspace->shell_stdout_capacity,
+            .stdout_buf           = workspace->shell_stdout_buf,
+            .stderr_capacity      = workspace->shell_stderr_capacity,
+            .stderr_buf           = workspace->shell_stderr_buf,
+        };
+        status = spg_shell_executor_step(
+            &shell_state, &shell_config, result->actor.model_output_n,
+            workspace->actor.model_output, &result->recommendation,
+            &result->policy_gate.decision, &shell_workspace, &result->shell);
+        if (status != SPG_OK) {
+            return status;
+        }
+        result->stage = SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED;
         return SPG_OK;
     }
 

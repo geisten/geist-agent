@@ -1,5 +1,6 @@
 #include "sporegeist/sporegeist.h"
 
+#include "sporegeist/agent_loop.h"
 #include "sporegeist/exec_command.h"
 #include "sporegeist/mem_command.h"
 #include "sporegeist/mem_store.h"
@@ -46,6 +47,8 @@ static void print_usage(const char *argv0) {
             "  memory           store/recall Markdown long-term memories\n"
             "  tick             run one fake-model orchestrator tick\n"
             "  run              run fake-model orchestrator ticks\n"
+            "  agent            run a governed multi-step agent loop "
+            "(scripted)\n"
             "  replay           print a journal timeline as JSONL\n"
             "  verify-journal   verify and summarize a journal\n"
             "  policy-check     validate and summarize a policy file\n"
@@ -1672,6 +1675,296 @@ static int run_command(int argc, char **argv) {
                     run_state_path, memory_dir);
 }
 
+#define AGENT_MAX_SCRIPT   64u
+#define AGENT_SHELL_STDOUT 4096u
+#define AGENT_SHELL_STDERR 1024u
+#define AGENT_OBS_BYTES    8192u
+
+/* Split a script buffer into one fake reply per non-blank line (pointers into
+ * data; no copy, no NUL needed). Returns the number of replies. */
+static size_t split_script_lines(char *data, const size_t n,
+                                 struct spg_fake_response out[static 1],
+                                 const size_t cap) {
+    size_t count = 0u;
+    size_t i     = 0u;
+    while (i < n && count < cap) {
+        while (i < n && (data[i] == '\n' || data[i] == '\r')) {
+            i += 1u;
+        }
+        if (i >= n) {
+            break;
+        }
+        const size_t start = i;
+        while (i < n && data[i] != '\n' && data[i] != '\r') {
+            i += 1u;
+        }
+        out[count].text = data + start;
+        out[count].n    = i - start;
+        count += 1u;
+    }
+    return count;
+}
+
+/* Governed multi-step agent loop driven by a scripted fake model: each line of
+ * --fake-script is one recommendation; the loop gates, executes, journals, and
+ * feeds each result forward until `finish` or a termination condition. */
+static int agent_command(int argc, char **argv) {
+    const char *run_path    = nullptr;
+    const char *script_path = nullptr;
+    const char *memory_dir  = getenv("SPOREGEIST_MEMORY_DIR");
+    size_t      max_steps   = 8u;
+    bool        allow_exec  = false;
+    for (int i = 2; i < argc; i += 1) {
+        if ((strcmp(argv[i], "--config") == 0 ||
+             strcmp(argv[i], "--run") == 0) &&
+            i + 1 < argc) {
+            run_path = argv[i + 1];
+            i += 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--fake-script") == 0 && i + 1 < argc) {
+            script_path = argv[i + 1];
+            i += 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--max-steps") == 0 && i + 1 < argc) {
+            if (!parse_positive_size(argv[i + 1], &max_steps)) {
+                fprintf(stderr, "agent: invalid --max-steps value: %s\n",
+                        argv[i + 1]);
+                return 2;
+            }
+            i += 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
+            memory_dir = argv[i + 1];
+            i += 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--allow-exec") == 0) {
+            allow_exec = true;
+            continue;
+        }
+        fprintf(stderr, "agent: unknown or incomplete argument: %s\n", argv[i]);
+        return 2;
+    }
+    if (run_path == nullptr || script_path == nullptr) {
+        fprintf(stderr,
+                "usage: %s agent --config <run> --fake-script <file> "
+                "[--max-steps N] [--allow-exec] [--memory-dir <d>]\n",
+                argv[0]);
+        return 2;
+    }
+
+    int                rc            = 1;
+    struct file_buffer run_text      = {};
+    struct file_buffer policy_text   = {};
+    struct file_buffer scenario_text = {};
+    struct file_buffer script_text   = {};
+    char              *policy_path   = nullptr;
+    char              *scenario_path = nullptr;
+    char              *journal_path  = nullptr;
+    char              *model_path    = nullptr;
+    struct spg_journal_writer journal     = {};
+    bool                      journal_open = false;
+    struct spg_model_adapter  model        = {};
+    bool                      model_open   = false;
+    struct spg_mem_store      store        = {};
+    bool                      store_open   = false;
+
+    struct spg_run_config run    = {};
+    enum spg_status       status = load_run_file(run_path, &run_text, &run);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: load run failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    status =
+        span_to_cstr(run_text.n, run_text.data, run.policy_path, &policy_path);
+    if (status == SPG_OK) {
+        status = span_to_cstr(run_text.n, run_text.data, run.scenario_path,
+                              &scenario_path);
+    }
+    if (status == SPG_OK) {
+        status = span_to_cstr(run_text.n, run_text.data, run.journal_path,
+                              &journal_path);
+    }
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: run paths failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    (void)span_to_cstr(run_text.n, run_text.data, run.model_path, &model_path);
+
+    struct spg_policy_config policy = {};
+    status = load_policy_file(policy_path, &policy_text, &policy);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: load policy failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    struct spg_sim_config sim = {};
+    status = load_scenario_file(scenario_path, &scenario_text, &sim);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: load scenario failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+
+    status = read_file(script_path, &script_text);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: read script failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    static struct spg_fake_response script[AGENT_MAX_SCRIPT];
+    const size_t                    script_n =
+        split_script_lines(script_text.data, script_text.n, script,
+                           AGENT_MAX_SCRIPT);
+    if (script_n == 0u) {
+        fprintf(stderr, "agent: empty --fake-script\n");
+        goto done;
+    }
+
+    status = spg_journal_writer_open(&journal, journal_path);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: open journal failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    journal_open = true;
+
+    const struct spg_model_adapter_config model_config = {
+        .kind                = SPG_MODEL_ADAPTER_FAKE,
+        .sampling            = {.top_p = 1.0f},
+        .fake_response_count = script_n,
+        .fake_responses      = script,
+    };
+    status = spg_model_adapter_init(&model, &model_config);
+    if (status != SPG_OK) {
+        fprintf(stderr, "agent: model init failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    model_open = true;
+
+    if (memory_dir != nullptr && memory_dir[0] != '\0') {
+        if (spg_mem_store_open(&store, memory_dir) != SPG_OK) {
+            fprintf(stderr, "agent: cannot open memory dir %s\n", memory_dir);
+            goto done;
+        }
+        store_open = true;
+    }
+
+    struct spg_graph  graph  = {};
+    struct spg_memory memory = {};
+    spg_graph_init(&graph);
+    spg_memory_init(&memory);
+
+    struct spg_context_graph_ref   graph_refs[CLI_CONTEXT_REFS];
+    struct spg_context_memory_ref  memory_refs[CLI_CONTEXT_REFS];
+    struct spg_context_journal_ref journal_refs[CLI_CONTEXT_REFS];
+    static char            context[CLI_CONTEXT_BYTES];
+    static char            model_output[CLI_MODEL_OUTPUT_BYTES];
+    static struct spg_sexpr_token rec_tokens[CLI_TOKEN_CAPACITY];
+    static struct spg_sexpr_node  rec_nodes[CLI_NODE_CAPACITY];
+    static char            policy_payload[CLI_PAYLOAD_BYTES];
+    static char            sim_payload[CLI_PAYLOAD_BYTES];
+    static char            observation[AGENT_OBS_BYTES];
+    static char            shell_stdout[AGENT_SHELL_STDOUT];
+    static char            shell_stderr[AGENT_SHELL_STDERR];
+    observation[0] = '\0';
+
+    const struct spg_orchestrator_workspace workspace = {
+        .actor = {.context_capacity      = sizeof context,
+                  .context               = context,
+                  .model_output_capacity = sizeof model_output,
+                  .model_output          = model_output,
+                  .graph_ref_capacity    = CLI_CONTEXT_REFS,
+                  .graph_refs            = graph_refs,
+                  .memory_ref_capacity   = CLI_CONTEXT_REFS,
+                  .memory_refs           = memory_refs,
+                  .journal_ref_capacity  = CLI_CONTEXT_REFS,
+                  .journal_refs          = journal_refs},
+        .recommendation_token_capacity = CLI_TOKEN_CAPACITY,
+        .recommendation_tokens         = rec_tokens,
+        .recommendation_node_capacity  = CLI_NODE_CAPACITY,
+        .recommendation_nodes          = rec_nodes,
+        .policy_payload_capacity       = sizeof policy_payload,
+        .policy_payload                = policy_payload,
+        .sim_payload_capacity          = sizeof sim_payload,
+        .sim_payload                   = sim_payload,
+        .memory_recall_capacity        = sizeof observation,
+        .memory_recall_buf             = observation,
+        .shell_stdout_capacity         = sizeof shell_stdout,
+        .shell_stdout_buf              = shell_stdout,
+        .shell_stderr_capacity         = sizeof shell_stderr,
+        .shell_stderr_buf              = shell_stderr,
+    };
+
+    struct spg_policy_usage       usage = {};
+    struct spg_orchestrator_state state = {
+        .graph         = &graph,
+        .memory        = &memory,
+        .journal       = &journal,
+        .model         = &model,
+        .sim           = &sim,
+        .store         = store_open ? &store : nullptr,
+        .run           = &run,
+        .usage         = &usage,
+        .policy        = &policy,
+        .policy_text_n = policy_text.n,
+        .policy_text   = policy_text.data,
+        .memory_recall = observation,
+    };
+    const struct spg_agent_loop_config loop_config = {
+        .base = {.actor_id            = 1u,
+                 .context_limits      = {.graph_nodes    = CLI_CONTEXT_REFS,
+                                         .memory_facts   = CLI_CONTEXT_REFS,
+                                         .journal_events = CLI_CONTEXT_REFS},
+                 .max_decode_tokens   = 256u,
+                 .reset_model_session = true,
+                 .write_journal       = true,
+                 .update_graph        = true,
+                 .update_memory       = true,
+                 .execution_enabled   = allow_exec,
+                 .exec_working_dir    = ".",
+                 .exec_workdir_prefix = ".",
+                 .exec_timeout_ms     = 5000u,
+                 .exec_stdout_cap     = sizeof shell_stdout,
+                 .exec_stderr_cap     = sizeof shell_stderr},
+        .max_steps    = max_steps,
+        .token_budget = run.budgets.tokens,
+    };
+    struct spg_agent_loop_result loop_result = {};
+    status =
+        spg_agent_loop_run(&state, &loop_config, &workspace, &usage, &loop_result);
+    printf("steps=%zu termination=%s journal=%s\n", loop_result.steps_taken,
+           spg_agent_loop_termination_to_string(loop_result.termination),
+           journal_path);
+    if (observation[0] != '\0') {
+        printf("observation: %s\n", observation);
+    }
+    rc = (status == SPG_OK) ? 0 : 1;
+
+done:
+    if (journal_open) {
+        (void)spg_journal_writer_close(&journal);
+    }
+    if (model_open) {
+        spg_model_adapter_destroy(&model);
+    }
+    free(policy_path);
+    free(scenario_path);
+    free(journal_path);
+    free(model_path);
+    free_file_buffer(&run_text);
+    free_file_buffer(&policy_text);
+    free_file_buffer(&scenario_text);
+    free_file_buffer(&script_text);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -1710,6 +2003,10 @@ int main(int argc, char **argv) {
             print_run_usage(argv[0]);
         }
         return rc;
+    }
+
+    if (strcmp(argv[1], "agent") == 0) {
+        return agent_command(argc, argv);
     }
 
     if (strcmp(argv[1], "verify-journal") == 0) {

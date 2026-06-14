@@ -90,6 +90,7 @@ SPG_SOURCES := \
     src/policy/policy.c \
     src/policy/policy_config.c \
     src/policy/policy_gate.c \
+    src/run/agent_loop.c \
     src/run/orchestrator.c \
     src/sim/risk.c \
     src/sim/sim_executor.c \

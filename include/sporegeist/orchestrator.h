@@ -5,6 +5,7 @@
 #include "sporegeist/mem_executor.h"
 #include "sporegeist/policy_gate.h"
 #include "sporegeist/recommendation.h"
+#include "sporegeist/shell_executor.h"
 #include "sporegeist/sim_executor.h"
 #include "sporegeist/status.h"
 
@@ -20,9 +21,14 @@ enum spg_orchestrator_stage {
     SPG_ORCHESTRATOR_STAGE_NOT_STARTED = 0,
     SPG_ORCHESTRATOR_STAGE_ACTOR_DONE,
     SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED,
+    /* The agent emitted a `finish` control action: a valid recommendation that
+     * short-circuits before the policy gate (no capability, no side effect).
+     * Ordered below POLICY_GATED so policy_evaluated() stays false for it. */
+    SPG_ORCHESTRATOR_STAGE_FINISHED,
     SPG_ORCHESTRATOR_STAGE_POLICY_GATED,
     SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED,
     SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED,
+    SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED,
 };
 
 struct spg_orchestrator_state {
@@ -63,6 +69,16 @@ struct spg_orchestrator_config {
     bool write_journal;
     bool update_graph;
     bool update_memory;
+
+    /* Governed local_shell execution. When a local_shell action is ALLOW'd, the
+     * shell executor runs it (gated by the boundary) inside working_dir; with
+     * execution_enabled false the boundary denies and only records the attempt. */
+    bool        execution_enabled;
+    const char *exec_working_dir;
+    const char *exec_workdir_prefix;
+    uint64_t    exec_timeout_ms;
+    size_t      exec_stdout_cap;
+    size_t      exec_stderr_cap;
 };
 
 struct spg_orchestrator_workspace {
@@ -79,8 +95,16 @@ struct spg_orchestrator_workspace {
     size_t sim_payload_capacity;
     char  *sim_payload;
 
-    size_t memory_recall_capacity; /* buffer for memory_read content */
+    /* The shared "last observation" channel: memory_read content OR local_shell
+     * output is written here and rendered into the next step's context. */
+    size_t memory_recall_capacity;
     char  *memory_recall_buf;
+
+    /* Scratch for local_shell stdout/stderr capture. */
+    size_t shell_stdout_capacity;
+    char  *shell_stdout_buf;
+    size_t shell_stderr_capacity;
+    char  *shell_stderr_buf;
 };
 
 struct spg_orchestrator_result {
@@ -92,6 +116,7 @@ struct spg_orchestrator_result {
     struct spg_policy_gate_result    policy_gate;
     struct spg_sim_executor_result   sim;
     struct spg_mem_executor_result   memory;
+    struct spg_shell_executor_result shell;
 };
 
 [[nodiscard]] enum spg_status
@@ -106,13 +131,12 @@ spg_orchestrator_stage_to_string(enum spg_orchestrator_stage stage);
 /* Derived views of a tick result. Each is a pure function of `stage`, the
  * single source of truth for how far the tick advanced. */
 
-/* The model produced a structurally valid recommendation (the tick reached the
- * policy gate). */
+/* The model produced a structurally valid recommendation (the tick advanced
+ * past the actor/reject stages — i.e. it was gated, executed, or `finish`). */
 [[nodiscard]] bool spg_orchestrator_recommendation_valid(
     const struct spg_orchestrator_result *result);
 
-/* The policy gate ran. Same predicate as recommendation_valid: the gate runs
- * exactly when the recommendation is valid. */
+/* The policy gate ran (the recommendation was a gateable action, not `finish`). */
 [[nodiscard]] bool spg_orchestrator_policy_evaluated(
     const struct spg_orchestrator_result *result);
 
@@ -123,6 +147,14 @@ spg_orchestrator_sim_executed(const struct spg_orchestrator_result *result);
 /* A memory action executed this tick. */
 [[nodiscard]] bool
 spg_orchestrator_memory_executed(const struct spg_orchestrator_result *result);
+
+/* A local_shell action executed this tick (ran or was boundary-denied). */
+[[nodiscard]] bool
+spg_orchestrator_shell_executed(const struct spg_orchestrator_result *result);
+
+/* The agent emitted `finish`: the loop should terminate as task-complete. */
+[[nodiscard]] bool
+spg_orchestrator_finished(const struct spg_orchestrator_result *result);
 
 #ifdef __cplusplus
 }

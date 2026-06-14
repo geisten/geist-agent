@@ -54,6 +54,9 @@ struct test_buffers {
     struct spg_sexpr_node  rec_nodes[128];
     char policy_payload[1024];
     char sim_payload[1024];
+    char observation[4096];
+    char shell_stdout[4096];
+    char shell_stderr[1024];
 };
 
 static struct spg_orchestrator_workspace workspace_for(
@@ -79,6 +82,12 @@ static struct spg_orchestrator_workspace workspace_for(
         .policy_payload                = buffers->policy_payload,
         .sim_payload_capacity          = sizeof buffers->sim_payload,
         .sim_payload                   = buffers->sim_payload,
+        .memory_recall_capacity        = sizeof buffers->observation,
+        .memory_recall_buf             = buffers->observation,
+        .shell_stdout_capacity         = sizeof buffers->shell_stdout,
+        .shell_stdout_buf              = buffers->shell_stdout,
+        .shell_stderr_capacity         = sizeof buffers->shell_stderr,
+        .shell_stderr_buf              = buffers->shell_stderr,
     };
 }
 
@@ -182,7 +191,7 @@ static int test_simulator_tick_executes(void) {
     return 0;
 }
 
-static int test_local_shell_stops_after_policy(void) {
+static int test_local_shell_executes_under_governance(void) {
     struct spg_policy_config policy = {};
     struct spg_policy_usage  usage = {};
     struct spg_sim_config    sim = {};
@@ -234,12 +243,81 @@ static int test_local_shell_stops_after_policy(void) {
         return 1;
     }
     spg_model_adapter_destroy(&model);
-    if (result.stage != SPG_ORCHESTRATOR_STAGE_POLICY_GATED ||
+    /* The shell action is ALLOW'd by policy and now reaches the governed shell
+     * executor. With execution_enabled unset (false), the boundary denies it,
+     * so it is "executed" (recorded) but not actually run. */
+    if (result.stage != SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED ||
         result.policy_gate.decision.kind != SPG_POLICY_DECISION_ALLOW ||
+        !spg_orchestrator_shell_executed(&result) || result.shell.approved ||
+        result.shell.boundary_reason !=
+            SPG_EXECUTOR_BOUNDARY_EXECUTION_DISABLED ||
         spg_orchestrator_sim_executed(&result)) {
         return 1;
     }
     return !sim.vulnerabilities[0u].patched ? 0 : 1;
+}
+
+static int test_local_shell_runs_when_enabled(void) {
+    struct spg_policy_config policy = {};
+    struct spg_policy_usage  usage = {};
+    struct spg_sim_config    sim = {};
+    struct spg_graph         graph = {};
+    struct spg_memory        memory = {};
+    struct spg_model_adapter model = {};
+    spg_graph_init(&graph);
+    spg_memory_init(&memory);
+    const char response[] =
+        "(recommend (kind local_shell) (capability \"build.run\") (cost 1) "
+        "(uses_network false) (confidence_bp 5000) (reason \"probe\") "
+        "(command \"echo orch-shell-ok\"))";
+    const struct spg_model_adapter_config model_config = {
+        .kind            = SPG_MODEL_ADAPTER_FAKE,
+        .sampling        = {.top_p = 1.0f},
+        .fake_response_n = sizeof response - 1u,
+        .fake_response   = response,
+    };
+    if (load_policy(&policy) != 0 || load_sim(&sim) != 0 ||
+        spg_model_adapter_init(&model, &model_config) != SPG_OK) {
+        spg_model_adapter_destroy(&model);
+        return 1;
+    }
+    struct test_buffers buffers = {};
+    const struct spg_orchestrator_workspace workspace = workspace_for(&buffers);
+    struct spg_orchestrator_state state = {
+        .graph         = &graph,
+        .memory        = &memory,
+        .model         = &model,
+        .sim           = &sim,
+        .usage         = &usage,
+        .policy        = &policy,
+        .policy_text_n = strlen(policy_text),
+        .policy_text   = policy_text,
+    };
+    const struct spg_orchestrator_config config = {
+        .actor_id               = 1u,
+        .context_limits         = {.graph_nodes = 8u,
+                                   .memory_facts = 8u,
+                                   .journal_events = 8u},
+        .max_decode_tokens      = 2u,
+        .execution_enabled      = true,
+        .exec_working_dir       = ".",
+        .exec_workdir_prefix    = ".",
+        .exec_timeout_ms        = 5000u,
+        .exec_stdout_cap        = sizeof buffers.shell_stdout,
+        .exec_stderr_cap        = sizeof buffers.shell_stderr,
+    };
+    struct spg_orchestrator_result result = {};
+    const enum spg_status status =
+        spg_orchestrator_tick(&state, &config, &workspace, &result);
+    spg_model_adapter_destroy(&model);
+    if (status != SPG_OK ||
+        result.stage != SPG_ORCHESTRATOR_STAGE_SHELL_EXECUTED ||
+        !result.shell.approved || !result.shell.started ||
+        result.shell.exit_code != 0) {
+        return 1;
+    }
+    /* The exec output landed in the observation channel (memory_recall buf). */
+    return strstr(buffers.observation, "orch-shell-ok") != nullptr ? 0 : 1;
 }
 
 static int test_rejected_recommendation_stops_before_policy(void) {
@@ -379,8 +457,12 @@ int main(void) {
         fprintf(stderr, "test_simulator_tick_executes failed\n");
         return 1;
     }
-    if (test_local_shell_stops_after_policy() != 0) {
-        fprintf(stderr, "test_local_shell_stops_after_policy failed\n");
+    if (test_local_shell_executes_under_governance() != 0) {
+        fprintf(stderr, "test_local_shell_executes_under_governance failed\n");
+        return 1;
+    }
+    if (test_local_shell_runs_when_enabled() != 0) {
+        fprintf(stderr, "test_local_shell_runs_when_enabled failed\n");
         return 1;
     }
     if (test_rejected_recommendation_stops_before_policy() != 0) {

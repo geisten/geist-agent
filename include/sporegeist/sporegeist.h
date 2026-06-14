@@ -1,6 +1,7 @@
 #ifndef SPOREGEIST_H
 #define SPOREGEIST_H
 
+#include "sporegeist/agent_loop.h"
 #include "sporegeist/allocator.h"
 #include "sporegeist/actor.h"
 #include "sporegeist/context.h"
