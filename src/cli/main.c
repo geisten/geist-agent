@@ -1952,6 +1952,7 @@ static int agent_command(int argc, char **argv) {
         .max_steps               = max_steps,
         .max_repairs             = max_repairs,
         .token_budget            = run.budgets.tokens,
+        .step_budget             = run.budgets.inference_steps,
         .journal_header_capacity = sizeof trajectory / sizeof trajectory[0],
         .journal_headers         = trajectory,
     };

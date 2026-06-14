@@ -34,6 +34,11 @@ struct spg_agent_loop_config {
     struct spg_orchestrator_config base;
     size_t                         max_steps;
     uint64_t                       token_budget; /* 0 = unlimited */
+    /* Policy step budget: the loop stops once this many steps have run (each
+     * step consumes one inference_step). Sourced from budgets.inference_steps,
+     * so loop length is policy-controlled, not only bounded by max_steps.
+     * 0 = unlimited. */
+    uint64_t step_budget;
 
     /* Self-repair: when a step's recommendation is malformed, write the parse
      * error into the observation channel and retry instead of terminating, up

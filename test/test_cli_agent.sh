@@ -70,4 +70,24 @@ rm "$T/j.sgj"
     --max-steps 5 --max-repairs 0 > "$T/agent_norepair.out" 2>&1
 grep -q "termination=rejected" "$T/agent_norepair.out"
 
+# --- the policy step budget (inference_steps) caps the loop before finish ---
+cat > "$T/run1.spg" <<EOF
+(run
+ (model "fake.gguf")
+ (policy "examples/policy.spg")
+ (scenario "examples/scenario.spg")
+ (corpus "examples/corpus.spg")
+ (journal "$T/j1.sgj")
+ (seed 42)
+ (budgets (inference_steps 1) (tokens 256) (shell_actions 1) (sim_actions 8) (wall_ms 10000) (journal_bytes 1048576) (risk_bp 10000)))
+EOF
+cat > "$T/sim_script.txt" <<'EOF'
+(recommend (kind simulator) (capability "sim.act") (cost 1) (uses_network false) (confidence_bp 7000) (reason "r"))
+(recommend (kind finish) (reason "done"))
+EOF
+"$SPG_BIN" agent --config "$T/run1.spg" --fake-script "$T/sim_script.txt" \
+    --max-steps 10 > "$T/agent_budget.out" 2>&1
+grep -q "termination=budget" "$T/agent_budget.out"
+grep -q "steps=1" "$T/agent_budget.out"
+
 echo "test_cli_agent: PASS"

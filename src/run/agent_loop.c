@@ -105,8 +105,10 @@ enum spg_status spg_agent_loop_run(
 
     uint64_t parent_sequence = config->base.parent_sequence;
     for (size_t step = 0u; step < config->max_steps; step += 1u) {
-        if (config->token_budget > 0u &&
-            usage->consumed.tokens >= config->token_budget) {
+        if ((config->token_budget > 0u &&
+             usage->consumed.tokens >= config->token_budget) ||
+            (config->step_budget > 0u &&
+             usage->consumed.inference_steps >= config->step_budget)) {
             result->termination = SPG_AGENT_LOOP_BUDGET;
             return SPG_OK;
         }
