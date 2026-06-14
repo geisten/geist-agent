@@ -517,11 +517,15 @@ static void append_budget_line(struct render_state *state, const char *name,
 static void render_contract(struct render_state *state) {
     append_cstr(state, "(contract\n");
     append_cstr(state, "  (role \"Return exactly one recommendation form.\")\n");
-    append_cstr(state, "  (schema \"(recommend (kind <simulator|local_shell|ssh_auth_probe>) (capability \\\"<policy capability>\\\") (cost <positive integer>) (uses_network <true|false>) (confidence_bp <0..10000>) (reason \\\"<short reason>\\\") [(command \\\"...\\\")|(target \\\"...\\\")])\")\n");
+    append_cstr(state, "  (schema \"(recommend (kind <simulator|local_shell|ssh_auth_probe|memory_save|memory_delete|memory_read>) (capability \\\"<policy capability>\\\") (cost <positive integer>) (uses_network <true|false>) (confidence_bp <0..10000>) (reason \\\"<short reason>\\\") [(command \\\"...\\\")|(target \\\"...\\\")|(slug \\\"...\\\") (description \\\"...\\\") (body \\\"...\\\")])\")\n");
     append_cstr(state, "  (rules\n");
     append_cstr(state, "    (simulator \"uses_network must be false and no command or target\")\n");
     append_cstr(state, "    (local_shell \"uses_network must be false and command is only a recommendation\")\n");
-    append_cstr(state, "    (ssh_auth_probe \"uses_network must be true and target is required; no attack is executed here\"))\n");
+    append_cstr(state, "    (ssh_auth_probe \"uses_network must be true and target is required; no attack is executed here\")\n");
+    append_cstr(state, "    (memory_save \"uses_network false; provide slug, description and body to remember something durably\")\n");
+    append_cstr(state, "    (memory_delete \"uses_network false; provide slug to forget a memory\")\n");
+    append_cstr(state, "    (memory_read \"uses_network false; provide slug to recall a memory; its content arrives next turn as memory_recall\"))\n");
+    append_cstr(state, "  (memory \"(memory_index ...) lists recallable memories by slug; (memory_recall ...) holds the last recalled content\")\n");
     append_cstr(state, ")\n");
 }
 

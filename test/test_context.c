@@ -260,6 +260,11 @@ static int test_render_and_limit(void) {
         strstr(large, "\"host-a\"") == nullptr) {
         return 1;
     }
+    /* The contract advertises the memory actions to the model. */
+    if (strstr(large, "memory_save") == nullptr ||
+        strstr(large, "memory_read") == nullptr) {
+        return 1;
+    }
     return 0;
 }
 
@@ -284,7 +289,9 @@ static int test_render_memory_index(void) {
     if (spg_context_render(&with, &view, sizeof buf, buf, &required) != SPG_OK) {
         return 1;
     }
-    if (strstr(buf, "(memory_index") == nullptr ||
+    /* Match the injected block (newline after the tag), not the contract's
+     * explanatory mention of memory_index. */
+    if (strstr(buf, "(memory_index\n") == nullptr ||
         strstr(buf, "- auth-flow: how login works") == nullptr) {
         return 1;
     }
@@ -295,7 +302,7 @@ static int test_render_memory_index(void) {
         SPG_OK) {
         return 1;
     }
-    return strstr(buf, "memory_index") == nullptr ? 0 : 1;
+    return strstr(buf, "(memory_index\n") == nullptr ? 0 : 1;
 }
 
 static int test_invalid_args(void) {
