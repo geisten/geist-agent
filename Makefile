@@ -73,6 +73,7 @@ SPG_SOURCES := \
     src/context/context.c \
     src/dsl/schema.c \
     src/dsl/sexpr.c \
+    src/eval/eval.c \
     src/exec/cmd_executor.c \
     src/exec/cmd_registry.c \
     src/exec/exec_command.c \
@@ -91,6 +92,7 @@ SPG_SOURCES := \
     src/policy/policy_config.c \
     src/policy/policy_gate.c \
     src/run/agent_loop.c \
+    src/run/agent_run.c \
     src/run/orchestrator.c \
     src/sim/risk.c \
     src/sim/sim_executor.c \
