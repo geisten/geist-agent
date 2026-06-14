@@ -24,13 +24,17 @@ extern "C" {
  *   (tool memory_read (slug "<slug>"))
  *   (tool memory_save (slug "<slug>") (description "<d>") (body "<b>"))
  *   (tool memory_delete (slug "<slug>"))
+ *   (tool exec (command "<shell command>"))   [only when allow_exec]
+ *
+ * exec runs a command via the bounded executor (timeout + output caps). It is
+ * gated behind allow_exec; when false the tool reports that exec is disabled.
  *
  * Returns SPG_E_INVALID_ARG on null arguments; otherwise SPG_OK (a tool's own
  * failure is reported in the result text, not the return value). */
 [[nodiscard]] enum spg_status
-spg_chat_tool_dispatch(struct spg_mem_store *store, size_t input_n,
-                       const char *input, size_t out_cap, char out[],
-                       bool *was_tool);
+spg_chat_tool_dispatch(struct spg_mem_store *store, bool allow_exec,
+                       size_t input_n, const char *input, size_t out_cap,
+                       char out[], bool *was_tool);
 
 #ifdef __cplusplus
 }

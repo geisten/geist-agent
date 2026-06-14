@@ -27,7 +27,7 @@ static int test_not_a_tool(void) {
     char out[64];
     bool was_tool = true;
     const char text[] = "Just a normal reply, not a tool call.";
-    if (spg_chat_tool_dispatch(&store, strlen(text), text, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(text), text, sizeof out, out,
                                &was_tool) != SPG_OK) {
         return 1;
     }
@@ -46,21 +46,21 @@ static int test_save_then_read(void) {
     const char save[] =
         "(tool memory_save (slug \"fav\") (description \"a fav\") "
         "(body \"the body content\"))";
-    if (spg_chat_tool_dispatch(&store, strlen(save), save, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(save), save, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "saved fav") == nullptr) {
         return 1;
     }
 
     const char read[] = "(tool memory_read (slug \"fav\"))";
-    if (spg_chat_tool_dispatch(&store, strlen(read), read, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(read), read, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "the body content") == nullptr) {
         return 1;
     }
 
     const char list[] = "(tool memory_list)";
-    if (spg_chat_tool_dispatch(&store, strlen(list), list, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(list), list, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "fav: a fav") == nullptr) {
         return 1;
@@ -80,7 +80,7 @@ static int test_delete(void) {
     char out[256];
     bool was_tool = false;
     const char del[] = "(tool memory_delete (slug \"gone\"))";
-    if (spg_chat_tool_dispatch(&store, strlen(del), del, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(del), del, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "deleted gone") == nullptr) {
         return 1;
@@ -101,15 +101,41 @@ static int test_unknown_and_bad_args(void) {
     char out[128];
     bool was_tool = false;
     const char unk[] = "(tool memory_frobnicate (slug \"x\"))";
-    if (spg_chat_tool_dispatch(&store, strlen(unk), unk, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(unk), unk, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "unknown tool") == nullptr) {
         return 1;
     }
     const char bad[] = "(tool memory_read)"; /* missing slug */
-    if (spg_chat_tool_dispatch(&store, strlen(bad), bad, sizeof out, out,
+    if (spg_chat_tool_dispatch(&store, false, strlen(bad), bad, sizeof out, out,
                                &was_tool) != SPG_OK ||
         !was_tool || strstr(out, "error") == nullptr) {
+        return 1;
+    }
+    return 0;
+}
+
+static int test_exec_gated(void) {
+    struct spg_mem_store store;
+    char                 dir[64];
+    if (open_temp(&store, dir) != 0) {
+        return 1;
+    }
+    char out[1024];
+    bool was_tool = false;
+    const char ex[] = "(tool exec (command \"echo chat-exec-ok\"))";
+
+    /* disabled by default */
+    if (spg_chat_tool_dispatch(&store, false, strlen(ex), ex, sizeof out, out,
+                               &was_tool) != SPG_OK ||
+        !was_tool || strstr(out, "disabled") == nullptr) {
+        return 1;
+    }
+    /* allowed -> runs the command, output captured */
+    if (spg_chat_tool_dispatch(&store, true, strlen(ex), ex, sizeof out, out,
+                               &was_tool) != SPG_OK ||
+        !was_tool || strstr(out, "chat-exec-ok") == nullptr ||
+        strstr(out, "exit 0") == nullptr) {
         return 1;
     }
     return 0;
@@ -130,6 +156,10 @@ int main(void) {
     }
     if (test_unknown_and_bad_args() != 0) {
         fprintf(stderr, "test_unknown_and_bad_args failed\n");
+        return 1;
+    }
+    if (test_exec_gated() != 0) {
+        fprintf(stderr, "test_exec_gated failed\n");
         return 1;
     }
     return 0;

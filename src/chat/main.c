@@ -29,7 +29,8 @@
 static void print_usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s [--model <path>] [--max-tokens <n>] [--no-download] "
-            "[--fake] [--transcript <path>] [--memory-dir <path>]\n"
+            "[--fake] [--transcript <path>] [--memory-dir <path>] "
+            "[--allow-exec]\n"
             "\n"
             "Interactive sporegeist chat REPL.\n"
             "Connects to a Gemma 4 GGUF via the geist engine. The model path is\n"
@@ -111,6 +112,7 @@ struct chat_args {
     const char *memory_dir;
     size_t      max_tokens;
     bool        allow_download;
+    bool        allow_exec;
     bool        fake;
 };
 
@@ -133,6 +135,10 @@ static int parse_args(int argc, char **argv, struct chat_args *out) {
         }
         if (strcmp(argv[i], "--no-download") == 0) {
             out->allow_download = false;
+            continue;
+        }
+        if (strcmp(argv[i], "--allow-exec") == 0) {
+            out->allow_exec = true;
             continue;
         }
         if (strcmp(argv[i], "--fake") == 0) {
@@ -447,6 +453,20 @@ int main(int argc, char **argv) {
                     "model: Standup is at 9:30 every day.\n"
                     "[memory index]\n%s[/memory index]\n\n",
                     idx);
+                if (args.allow_exec) {
+                    const size_t o = strlen(composed);
+                    (void)snprintf(
+                        composed + o, sizeof composed - o,
+                        "[tools+] You may also run a guarded shell command. To "
+                        "do so, reply with EXACTLY (tool exec (command "
+                        "\"<cmd>\")) and nothing else. The real output returns "
+                        "as [tool_result]; never invent it.\n"
+                        "Example:\n"
+                        "user: what kernel is this?\n"
+                        "model: (tool exec (command \"uname -s\"))\n"
+                        "[tool_result]\nexit 0\nDarwin\n"
+                        "model: This system's kernel is Darwin.\n\n");
+                }
                 index_injected = true;
             }
             if (pending[0] != '\0') {
@@ -493,9 +513,9 @@ int main(int argc, char **argv) {
             }
             static char tool_result[CHAT_OUTPUT_BYTES];
             bool        was_tool = false;
-            (void)spg_chat_tool_dispatch(&mem, strlen(output), output,
-                                         sizeof tool_result, tool_result,
-                                         &was_tool);
+            (void)spg_chat_tool_dispatch(&mem, args.allow_exec, strlen(output),
+                                         output, sizeof tool_result,
+                                         tool_result, &was_tool);
             if (!was_tool) {
                 break;
             }
