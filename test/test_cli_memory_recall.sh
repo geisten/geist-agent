@@ -23,7 +23,9 @@ printf 'REMEMBERED SECRET\n' | "$SPG_BIN" memory --dir "$T/mem" save secret "a s
 "$SPG_BIN" run --config "$T/run.spg" --memory-dir "$T/mem" --ticks 2 \
     --fake '(recommend (kind memory_read) (capability "mem.write") (cost 1) (uses_network false) (confidence_bp 9000) (reason "recall") (slug "secret"))' \
     >/dev/null 2>&1
-grep -aq "memory_recall" "$T/j.sgj"
+# the recalled content is rendered into the next tick's context via the
+# generic observation channel (journaled as model input)
+grep -aq "(observation " "$T/j.sgj"
 grep -aq "REMEMBERED SECRET" "$T/j.sgj"
 "$SPG_BIN" verify-journal "$T/j.sgj" | grep -q "event.memory"
 

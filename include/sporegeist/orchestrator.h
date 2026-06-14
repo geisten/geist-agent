@@ -54,7 +54,7 @@ struct spg_orchestrator_state {
     size_t      memory_text_n;
     const char *memory_text;
     const char *memory_index;
-    const char *memory_recall;
+    const char *observation;
 };
 
 struct spg_orchestrator_config {
@@ -97,8 +97,8 @@ struct spg_orchestrator_workspace {
 
     /* The shared "last observation" channel: memory_read content OR local_shell
      * output is written here and rendered into the next step's context. */
-    size_t memory_recall_capacity;
-    char  *memory_recall_buf;
+    size_t observation_capacity;
+    char  *observation_buf;
 
     /* Scratch for local_shell stdout/stderr capture. */
     size_t shell_stdout_capacity;

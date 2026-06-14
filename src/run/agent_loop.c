@@ -142,11 +142,11 @@ enum spg_status spg_agent_loop_run(
             /* Self-repair: surface the parse error as the next observation and
              * retry, rather than giving up on one malformed reply. */
             if (result->repairs_used < config->max_repairs &&
-                workspace->memory_recall_buf != nullptr &&
-                workspace->memory_recall_capacity > 0u) {
+                workspace->observation_buf != nullptr &&
+                workspace->observation_capacity > 0u) {
                 (void)snprintf(
-                    workspace->memory_recall_buf,
-                    workspace->memory_recall_capacity,
+                    workspace->observation_buf,
+                    workspace->observation_capacity,
                     "[invalid recommendation: %s] Reply with exactly one valid "
                     "(recommend ...) form, or (recommend (kind finish) "
                     "(reason \"...\")).",

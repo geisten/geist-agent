@@ -36,7 +36,7 @@ struct spg_context_sources {
     /* Pre-rendered long-term memory index (one hook per line), or null. */
     const char                        *memory_index;
     /* Content of the most recently recalled memory (memory_read), or null. */
-    const char                        *memory_recall;
+    const char                        *observation;
 };
 
 struct spg_context_budget_item {

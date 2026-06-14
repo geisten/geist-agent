@@ -82,8 +82,8 @@ static struct spg_orchestrator_workspace workspace_for(
         .policy_payload                = buffers->policy_payload,
         .sim_payload_capacity          = sizeof buffers->sim_payload,
         .sim_payload                   = buffers->sim_payload,
-        .memory_recall_capacity        = sizeof buffers->observation,
-        .memory_recall_buf             = buffers->observation,
+        .observation_capacity        = sizeof buffers->observation,
+        .observation_buf             = buffers->observation,
         .shell_stdout_capacity         = sizeof buffers->shell_stdout,
         .shell_stdout_buf              = buffers->shell_stdout,
         .shell_stderr_capacity         = sizeof buffers->shell_stderr,
@@ -316,7 +316,7 @@ static int test_local_shell_runs_when_enabled(void) {
         result.shell.exit_code != 0) {
         return 1;
     }
-    /* The exec output landed in the observation channel (memory_recall buf). */
+    /* The exec output landed in the observation channel (observation buf). */
     return strstr(buffers.observation, "orch-shell-ok") != nullptr ? 0 : 1;
 }
 

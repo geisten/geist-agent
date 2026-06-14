@@ -526,8 +526,8 @@ static void render_contract(struct render_state *state) {
     append_cstr(state, "    (ssh_auth_probe \"uses_network must be true and target is required; no attack is executed here\")\n");
     append_cstr(state, "    (memory_save \"uses_network false; provide slug, description and body to remember something durably\")\n");
     append_cstr(state, "    (memory_delete \"uses_network false; provide slug to forget a memory\")\n");
-    append_cstr(state, "    (memory_read \"uses_network false; provide slug to recall a memory; its content arrives next turn as memory_recall\"))\n");
-    append_cstr(state, "  (memory \"(memory_index ...) lists recallable memories by slug; (memory_recall ...) holds the last recalled content\")\n");
+    append_cstr(state, "    (memory_read \"uses_network false; provide slug to recall a memory; its content arrives next turn as observation\"))\n");
+    append_cstr(state, "  (memory \"(memory_index ...) lists recallable memories by slug; (observation ...) holds the last tool result -- recalled memory or command output\")\n");
     append_cstr(state, ")\n");
 }
 
@@ -660,14 +660,14 @@ static void render_memory_index(const struct spg_context_sources *sources,
 }
 
 /* Content of the most recently recalled memory, as a quoted string. */
-static void render_memory_recall(const struct spg_context_sources *sources,
+static void render_observation(const struct spg_context_sources *sources,
                                  struct render_state *state) {
-    if (sources->memory_recall == nullptr ||
-        sources->memory_recall[0] == '\0') {
+    if (sources->observation == nullptr ||
+        sources->observation[0] == '\0') {
         return;
     }
-    append_cstr(state, "(memory_recall ");
-    append_quoted_cstr(state, sources->memory_recall);
+    append_cstr(state, "(observation ");
+    append_quoted_cstr(state, sources->observation);
     append_cstr(state, ")\n");
 }
 
@@ -695,7 +695,7 @@ enum spg_status spg_context_render(const struct spg_context_sources *sources,
     render_graph(sources, view, &state);
     render_memory(sources, view, &state);
     render_memory_index(sources, &state);
-    render_memory_recall(sources, &state);
+    render_observation(sources, &state);
     render_journal(view, &state);
 
     if (state.used < state.capacity) {

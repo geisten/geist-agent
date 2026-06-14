@@ -39,7 +39,7 @@ struct spg_agent_loop_config {
      * error into the observation channel and retry instead of terminating, up
      * to this many times total. 0 = terminate on the first rejection. Repairs
      * still count against max_steps. Requires an observation buffer in the
-     * workspace (memory_recall_buf). */
+     * workspace (observation_buf). */
     size_t max_repairs;
 
     /* Optional trajectory feedback: a caller-owned array the loop binds to the

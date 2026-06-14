@@ -1478,8 +1478,8 @@ static int run_loop(const char *run_path, const char *fake_output,
         .policy_payload                = policy_payload,
         .sim_payload_capacity          = sizeof sim_payload,
         .sim_payload                   = sim_payload,
-        .memory_recall_capacity        = sizeof mem_recall_buf,
-        .memory_recall_buf             = mem_recall_buf,
+        .observation_capacity        = sizeof mem_recall_buf,
+        .observation_buf             = mem_recall_buf,
     };
 
     struct spg_policy_usage usage = {};
@@ -1501,7 +1501,7 @@ static int run_loop(const char *run_path, const char *fake_output,
         .memory_text_n = 0u,
         .memory_text   = nullptr,
         .memory_index  = have_store ? mem_index_buf : nullptr,
-        .memory_recall = have_store ? mem_recall_buf : nullptr,
+        .observation = have_store ? mem_recall_buf : nullptr,
     };
 
     uint64_t parent_sequence = 0u;
@@ -1910,8 +1910,8 @@ static int agent_command(int argc, char **argv) {
         .policy_payload                = policy_payload,
         .sim_payload_capacity          = sizeof sim_payload,
         .sim_payload                   = sim_payload,
-        .memory_recall_capacity        = sizeof observation,
-        .memory_recall_buf             = observation,
+        .observation_capacity        = sizeof observation,
+        .observation_buf             = observation,
         .shell_stdout_capacity         = sizeof shell_stdout,
         .shell_stdout_buf              = shell_stdout,
         .shell_stderr_capacity         = sizeof shell_stderr,
@@ -1931,7 +1931,7 @@ static int agent_command(int argc, char **argv) {
         .policy        = &policy,
         .policy_text_n = policy_text.n,
         .policy_text   = policy_text.data,
-        .memory_recall = observation,
+        .observation = observation,
     };
     const struct spg_agent_loop_config loop_config = {
         .base = {.actor_id            = 1u,

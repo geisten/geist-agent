@@ -186,7 +186,7 @@ enum spg_status spg_orchestrator_tick(
         .memory_text_n        = state->memory_text_n,
         .memory_text          = state->memory_text,
         .memory_index         = state->memory_index,
-        .memory_recall        = state->memory_recall,
+        .observation        = state->observation,
     };
     const struct spg_actor_step_config actor_config = {
         .actor_id            = config->actor_id,
@@ -284,8 +284,8 @@ enum spg_status spg_orchestrator_tick(
         const struct spg_mem_executor_workspace mem_workspace = {
             .payload_capacity = workspace->sim_payload_capacity,
             .payload          = workspace->sim_payload,
-            .recall_capacity  = workspace->memory_recall_capacity,
-            .recall           = workspace->memory_recall_buf,
+            .recall_capacity  = workspace->observation_capacity,
+            .recall           = workspace->observation_buf,
         };
         status = spg_mem_executor_step(
             &mem_state, &mem_config, result->actor.model_output_n,
@@ -299,7 +299,7 @@ enum spg_status spg_orchestrator_tick(
     }
 
     if (result->recommendation.action_kind == SPG_ACTION_LOCAL_SHELL) {
-        if (workspace->memory_recall_buf == nullptr ||
+        if (workspace->observation_buf == nullptr ||
             workspace->shell_stdout_buf == nullptr ||
             workspace->shell_stderr_buf == nullptr) {
             return SPG_E_INVALID_ARG;
@@ -324,8 +324,8 @@ enum spg_status spg_orchestrator_tick(
         const struct spg_shell_executor_workspace shell_workspace = {
             .payload_capacity     = workspace->sim_payload_capacity,
             .payload              = workspace->sim_payload,
-            .observation_capacity = workspace->memory_recall_capacity,
-            .observation          = workspace->memory_recall_buf,
+            .observation_capacity = workspace->observation_capacity,
+            .observation          = workspace->observation_buf,
             .stdout_capacity      = workspace->shell_stdout_capacity,
             .stdout_buf           = workspace->shell_stdout_buf,
             .stderr_capacity      = workspace->shell_stderr_capacity,
