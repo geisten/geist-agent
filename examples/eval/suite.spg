@@ -1,0 +1,9 @@
+(eval_suite
+ (config "examples/run.spg")
+ (case (name "sim-finish") (script "examples/eval/sim_finish.txt") (max_steps 5)
+       (expect (termination finished) (min_steps 2) (max_steps 2)))
+ (case (name "exec-finish") (script "examples/eval/exec_finish.txt")
+       (allow_exec true) (max_steps 5)
+       (expect (termination finished) (observation "EVAL-PROOF")))
+ (case (name "capped") (script "examples/eval/capped.txt") (max_steps 2)
+       (expect (termination max_steps))))

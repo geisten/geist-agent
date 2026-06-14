@@ -1,6 +1,7 @@
 #include "sporegeist/sporegeist.h"
 
 #include "sporegeist/agent_loop.h"
+#include "sporegeist/eval.h"
 #include "sporegeist/exec_command.h"
 #include "sporegeist/mem_command.h"
 #include "sporegeist/mem_store.h"
@@ -49,6 +50,7 @@ static void print_usage(const char *argv0) {
             "  run              run fake-model orchestrator ticks\n"
             "  agent            run a governed multi-step agent loop "
             "(scripted)\n"
+            "  eval             score a scripted agent suite (JSONL report)\n"
             "  replay           print a journal timeline as JSONL\n"
             "  verify-journal   verify and summarize a journal\n"
             "  policy-check     validate and summarize a policy file\n"
@@ -1683,6 +1685,7 @@ static int run_command(int argc, char **argv) {
 #define AGENT_SHELL_STDOUT 4096u
 #define AGENT_SHELL_STDERR 1024u
 #define AGENT_OBS_BYTES    8192u
+#define CLI_PATH_MAX       4096u
 
 /* Split a script buffer into one fake reply per non-blank line (pointers into
  * data; no copy, no NUL needed). Returns the number of replies. */
@@ -1985,6 +1988,327 @@ done:
     return rc;
 }
 
+/* ---- eval suite runner ---- */
+
+/* Find a (name ...) child-list directly under parent; INVALID if absent. */
+static uint32_t eval_field(const struct spg_sexpr_node *nodes,
+                           const uint32_t parent, const size_t in_n,
+                           const char *in, const char *name) {
+    for (uint32_t c = spg_sexpr_first_child(nodes, parent);
+         c != SPG_SEXPR_INVALID_INDEX; c = nodes[c].next_sibling) {
+        if (nodes[c].kind != SPG_SEXPR_NODE_LIST) {
+            continue;
+        }
+        const uint32_t head = spg_sexpr_first_child(nodes, c);
+        if (head != SPG_SEXPR_INVALID_INDEX &&
+            nodes[head].kind == SPG_SEXPR_NODE_SYMBOL &&
+            spg_sexpr_span_eq_cstr(in_n, in, nodes[head].span, name)) {
+            return c;
+        }
+    }
+    return SPG_SEXPR_INVALID_INDEX;
+}
+
+static bool eval_str(const struct spg_sexpr_node *nodes, const uint32_t parent,
+                     const size_t in_n, const char *in, const char *name,
+                     char *out, const size_t cap) {
+    const uint32_t f = eval_field(nodes, parent, in_n, in, name);
+    if (f == SPG_SEXPR_INVALID_INDEX) {
+        return false;
+    }
+    const uint32_t v = spg_sexpr_second_child(nodes, f);
+    struct spg_text_span sp;
+    if (v == SPG_SEXPR_INVALID_INDEX ||
+        !spg_sexpr_string_payload_span(&nodes[v], &sp) || sp.length + 1u > cap) {
+        return false;
+    }
+    memcpy(out, in + sp.offset, sp.length);
+    out[sp.length] = '\0';
+    return true;
+}
+
+static bool eval_u64(const struct spg_sexpr_node *nodes, const uint32_t parent,
+                     const size_t in_n, const char *in, const char *name,
+                     uint64_t *out) {
+    const uint32_t f = eval_field(nodes, parent, in_n, in, name);
+    if (f == SPG_SEXPR_INVALID_INDEX) {
+        return false;
+    }
+    const uint32_t v = spg_sexpr_second_child(nodes, f);
+    if (v == SPG_SEXPR_INVALID_INDEX || nodes[v].kind != SPG_SEXPR_NODE_SYMBOL) {
+        return false;
+    }
+    return spg_sexpr_parse_uint64_span(in_n, in, nodes[v].span, out) == SPG_OK;
+}
+
+static bool eval_flag(const struct spg_sexpr_node *nodes, const uint32_t parent,
+                      const size_t in_n, const char *in, const char *name) {
+    const uint32_t f = eval_field(nodes, parent, in_n, in, name);
+    if (f == SPG_SEXPR_INVALID_INDEX) {
+        return false;
+    }
+    const uint32_t v = spg_sexpr_second_child(nodes, f);
+    return v != SPG_SEXPR_INVALID_INDEX &&
+           nodes[v].kind == SPG_SEXPR_NODE_SYMBOL &&
+           spg_sexpr_span_eq_cstr(in_n, in, nodes[v].span, "true");
+}
+
+/* Map an (expect (termination <sym>) ...) symbol to the enum. */
+static bool eval_termination(const struct spg_sexpr_node *nodes,
+                             const uint32_t expect, const size_t in_n,
+                             const char *in,
+                             enum spg_agent_loop_termination *out) {
+    const uint32_t f = eval_field(nodes, expect, in_n, in, "termination");
+    if (f == SPG_SEXPR_INVALID_INDEX) {
+        return false;
+    }
+    const uint32_t v = spg_sexpr_second_child(nodes, f);
+    if (v == SPG_SEXPR_INVALID_INDEX || nodes[v].kind != SPG_SEXPR_NODE_SYMBOL) {
+        return false;
+    }
+    static const enum spg_agent_loop_termination all[] = {
+        SPG_AGENT_LOOP_FINISHED, SPG_AGENT_LOOP_MAX_STEPS,
+        SPG_AGENT_LOOP_REJECTED, SPG_AGENT_LOOP_DENIED,
+        SPG_AGENT_LOOP_BUDGET,   SPG_AGENT_LOOP_ERROR};
+    for (size_t i = 0u; i < sizeof all / sizeof all[0]; i += 1u) {
+        if (spg_sexpr_span_eq_cstr(in_n, in, nodes[v].span,
+                                   spg_agent_loop_termination_to_string(all[i]))) {
+            *out = all[i];
+            return true;
+        }
+    }
+    return false;
+}
+
+#define EVAL_SCRIPT_MAX 64u
+
+static int eval_command(int argc, char **argv) {
+    const char *suite_path = nullptr;
+    for (int i = 2; i < argc; i += 1) {
+        if (suite_path == nullptr && argv[i][0] != '-') {
+            suite_path = argv[i];
+            continue;
+        }
+        fprintf(stderr, "eval: unexpected argument: %s\n", argv[i]);
+        return 2;
+    }
+    if (suite_path == nullptr) {
+        fprintf(stderr, "usage: %s eval <suite.spg>\n", argv[0]);
+        return 2;
+    }
+
+    int                rc            = 1;
+    struct file_buffer suite_text    = {};
+    struct file_buffer run_text      = {};
+    struct file_buffer policy_text   = {};
+    struct file_buffer scenario_text = {};
+    char              *policy_path   = nullptr;
+    char              *scenario_path = nullptr;
+
+    enum spg_status status = read_file(suite_path, &suite_text);
+    if (status != SPG_OK) {
+        fprintf(stderr, "eval: read suite failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    static struct spg_sexpr_token tok[CLI_TOKEN_CAPACITY];
+    static struct spg_sexpr_node  nod[CLI_NODE_CAPACITY];
+    size_t                        tn = 0u;
+    size_t                        nn = 0u;
+    struct spg_sexpr_error        se = {};
+    if (spg_sexpr_parse_text(suite_text.n, suite_text.data, CLI_TOKEN_CAPACITY,
+                             tok, CLI_NODE_CAPACITY, nod, &tn, &nn, &se) !=
+            SPG_OK ||
+        nn == 0u || nod[0].kind != SPG_SEXPR_NODE_LIST) {
+        fprintf(stderr, "eval: suite parse failed\n");
+        goto done;
+    }
+    char config_path[CLI_PATH_MAX];
+    if (!eval_str(nod, 0u, suite_text.n, suite_text.data, "config", config_path,
+                  sizeof config_path)) {
+        fprintf(stderr, "eval: suite missing (config \"...\")\n");
+        goto done;
+    }
+
+    struct spg_run_config run = {};
+    status = load_run_file(config_path, &run_text, &run);
+    if (status == SPG_OK) {
+        status = span_to_cstr(run_text.n, run_text.data, run.policy_path,
+                              &policy_path);
+    }
+    if (status == SPG_OK) {
+        status = span_to_cstr(run_text.n, run_text.data, run.scenario_path,
+                              &scenario_path);
+    }
+    if (status != SPG_OK) {
+        fprintf(stderr, "eval: load config failed: %s\n",
+                spg_status_to_string(status));
+        goto done;
+    }
+    struct spg_policy_config policy = {};
+    struct spg_sim_config    sim    = {};
+    if (load_policy_file(policy_path, &policy_text, &policy) != SPG_OK ||
+        load_scenario_file(scenario_path, &scenario_text, &sim) != SPG_OK) {
+        fprintf(stderr, "eval: load policy/scenario failed\n");
+        goto done;
+    }
+
+    static struct spg_context_graph_ref   graph_refs[CLI_CONTEXT_REFS];
+    static struct spg_context_memory_ref  memory_refs[CLI_CONTEXT_REFS];
+    static struct spg_context_journal_ref journal_refs[CLI_CONTEXT_REFS];
+    static char            context[CLI_CONTEXT_BYTES];
+    static char            model_output[CLI_MODEL_OUTPUT_BYTES];
+    static struct spg_sexpr_token rtok[CLI_TOKEN_CAPACITY];
+    static struct spg_sexpr_node  rnod[CLI_NODE_CAPACITY];
+    static char            ppay[CLI_PAYLOAD_BYTES];
+    static char            spay[CLI_PAYLOAD_BYTES];
+    static char            observation[AGENT_OBS_BYTES];
+    static char            sh_out[AGENT_SHELL_STDOUT];
+    static char            sh_err[AGENT_SHELL_STDERR];
+    static struct spg_journal_record_header traj[256];
+    const struct spg_agent_run_workspace ws = {
+        .context_capacity        = sizeof context,
+        .context                 = context,
+        .model_output_capacity   = sizeof model_output,
+        .model_output            = model_output,
+        .graph_ref_capacity      = CLI_CONTEXT_REFS,
+        .graph_refs              = graph_refs,
+        .memory_ref_capacity     = CLI_CONTEXT_REFS,
+        .memory_refs             = memory_refs,
+        .journal_ref_capacity    = CLI_CONTEXT_REFS,
+        .journal_refs            = journal_refs,
+        .token_capacity          = CLI_TOKEN_CAPACITY,
+        .tokens                  = rtok,
+        .node_capacity           = CLI_NODE_CAPACITY,
+        .nodes                   = rnod,
+        .policy_payload_capacity = sizeof ppay,
+        .policy_payload          = ppay,
+        .sim_payload_capacity    = sizeof spay,
+        .sim_payload             = spay,
+        .observation_capacity    = sizeof observation,
+        .observation             = observation,
+        .shell_stdout_capacity   = sizeof sh_out,
+        .shell_stdout            = sh_out,
+        .shell_stderr_capacity   = sizeof sh_err,
+        .shell_stderr            = sh_err,
+        .trajectory_capacity     = 256u,
+        .trajectory              = traj,
+    };
+    const struct spg_agent_run_inputs inputs = {
+        .policy        = &policy,
+        .policy_text_n = policy_text.n,
+        .policy_text   = policy_text.data,
+        .run           = &run,
+        .sim           = &sim,
+    };
+
+    size_t total  = 0u;
+    size_t passed = 0u;
+    for (uint32_t c = spg_sexpr_first_child(nod, 0u);
+         c != SPG_SEXPR_INVALID_INDEX; c = nod[c].next_sibling) {
+        const uint32_t head = spg_sexpr_first_child(nod, c);
+        if (nod[c].kind != SPG_SEXPR_NODE_LIST ||
+            head == SPG_SEXPR_INVALID_INDEX ||
+            !spg_sexpr_span_eq_cstr(suite_text.n, suite_text.data,
+                                    nod[head].span, "case")) {
+            continue;
+        }
+        char name[64]        = "case";
+        char script_path[CLI_PATH_MAX];
+        char obs[256];
+        (void)eval_str(nod, c, suite_text.n, suite_text.data, "name", name,
+                       sizeof name);
+        if (!eval_str(nod, c, suite_text.n, suite_text.data, "script",
+                      script_path, sizeof script_path)) {
+            fprintf(stderr, "eval: case '%s' missing (script \"...\")\n", name);
+            goto done;
+        }
+        uint64_t max_steps   = 8u;
+        uint64_t max_repairs = 0u;
+        (void)eval_u64(nod, c, suite_text.n, suite_text.data, "max_steps",
+                       &max_steps);
+        (void)eval_u64(nod, c, suite_text.n, suite_text.data, "max_repairs",
+                       &max_repairs);
+        const bool allow_exec =
+            eval_flag(nod, c, suite_text.n, suite_text.data, "allow_exec");
+
+        struct spg_eval_expect expect = {};
+        const uint32_t exp = eval_field(nod, c, suite_text.n, suite_text.data,
+                                        "expect");
+        if (exp != SPG_SEXPR_INVALID_INDEX) {
+            enum spg_agent_loop_termination term;
+            if (eval_termination(nod, exp, suite_text.n, suite_text.data,
+                                 &term)) {
+                expect.check_termination = true;
+                expect.termination       = term;
+            }
+            uint64_t mn = 0u;
+            uint64_t mx = 0u;
+            if (eval_u64(nod, exp, suite_text.n, suite_text.data, "min_steps",
+                         &mn)) {
+                expect.min_steps = (size_t)mn;
+            }
+            if (eval_u64(nod, exp, suite_text.n, suite_text.data, "max_steps",
+                         &mx)) {
+                expect.max_steps = (size_t)mx;
+            }
+            if (eval_str(nod, exp, suite_text.n, suite_text.data, "observation",
+                         obs, sizeof obs)) {
+                expect.observation = obs;
+            }
+        }
+
+        struct file_buffer script_text = {};
+        if (read_file(script_path, &script_text) != SPG_OK) {
+            fprintf(stderr, "eval: case '%s' read script failed\n", name);
+            goto done;
+        }
+        static struct spg_fake_response script[EVAL_SCRIPT_MAX];
+        const size_t script_n = split_script_lines(
+            script_text.data, script_text.n, script, EVAL_SCRIPT_MAX);
+
+        const struct spg_agent_run_config rcfg = {
+            .max_steps         = (size_t)max_steps,
+            .max_repairs       = (size_t)max_repairs,
+            .execution_enabled = allow_exec,
+            .exec_timeout_ms   = 5000u,
+            .exec_stdout_cap   = sizeof sh_out,
+            .exec_stderr_cap   = sizeof sh_err,
+            .context_refs      = CLI_CONTEXT_REFS,
+        };
+        struct spg_eval_case_result res = {};
+        const enum spg_status        cs  = spg_eval_run_case(
+            script, script_n, &inputs, &rcfg, &ws, &expect, &res);
+        free_file_buffer(&script_text);
+        if (cs != SPG_OK) {
+            fprintf(stderr, "eval: case '%s' run failed: %s\n", name,
+                    spg_status_to_string(cs));
+            goto done;
+        }
+        total += 1u;
+        if (res.outcome == SPG_EVAL_PASS) {
+            passed += 1u;
+        }
+        printf("{\"name\":\"%s\",\"outcome\":\"%s\",\"termination\":\"%s\","
+               "\"steps\":%zu,\"repairs\":%zu}\n",
+               name, spg_eval_outcome_to_string(res.outcome),
+               spg_agent_loop_termination_to_string(res.termination),
+               res.steps_taken, res.repairs_used);
+    }
+    printf("{\"suite\":\"%s\",\"total\":%zu,\"passed\":%zu}\n", suite_path,
+           total, passed);
+    rc = (total > 0u && passed == total) ? 0 : 1;
+
+done:
+    free(policy_path);
+    free(scenario_path);
+    free_file_buffer(&suite_text);
+    free_file_buffer(&run_text);
+    free_file_buffer(&policy_text);
+    free_file_buffer(&scenario_text);
+    return rc;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -2027,6 +2351,10 @@ int main(int argc, char **argv) {
 
     if (strcmp(argv[1], "agent") == 0) {
         return agent_command(argc, argv);
+    }
+
+    if (strcmp(argv[1], "eval") == 0) {
+        return eval_command(argc, argv);
     }
 
     if (strcmp(argv[1], "verify-journal") == 0) {
