@@ -61,6 +61,8 @@ static const char *action_kind_name(const enum spg_action_kind kind) {
         return "ssh_auth_probe";
     case SPG_ACTION_SIMULATOR:
         return "simulator";
+    case SPG_ACTION_MEMORY_SAVE:
+        return "memory_save";
     }
     return "unknown";
 }

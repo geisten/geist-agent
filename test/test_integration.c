@@ -97,6 +97,36 @@ static int test_non_shell_unsupported(void) {
                : 1;
 }
 
+static int test_memory_save_parsed(void) {
+    /* A memory_save recommendation parses VALID with its three extra fields and
+     * maps to the memory capability/action kind. */
+    const char text[] =
+        "(recommend (kind memory_save) (capability \"mem.write\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"save\") "
+        "(slug \"k\") (description \"hook\") (body \"content\"))";
+    struct spg_recommendation rec = {};
+    if (parse_rec(text, &rec) != SPG_OK ||
+        rec.state != SPG_RECOMMENDATION_VALID ||
+        rec.action_kind != SPG_ACTION_MEMORY_SAVE) {
+        return 1;
+    }
+    return (rec.has_slug && rec.has_description && rec.has_body &&
+            !rec.action.uses_network && !rec.has_command)
+               ? 0
+               : 1;
+}
+
+static int test_memory_save_needs_fields(void) {
+    /* Missing the body field makes it not VALID (kind/field coupling). */
+    const char text[] =
+        "(recommend (kind memory_save) (capability \"mem.write\") (cost 1) "
+        "(uses_network false) (confidence_bp 9000) (reason \"save\") "
+        "(slug \"k\") (description \"hook\"))";
+    struct spg_recommendation rec = {};
+    (void)parse_rec(text, &rec);
+    return rec.state == SPG_RECOMMENDATION_VALID ? 1 : 0;
+}
+
 static int test_garbage_rejected(void) {
     const char text[] = "(recommend (kind not_a_kind) (capability \"x\"))";
     struct spg_recommendation rec = {};
@@ -120,6 +150,14 @@ int main(void) {
     }
     if (test_non_shell_unsupported() != 0) {
         fprintf(stderr, "test_non_shell_unsupported failed\n");
+        return 1;
+    }
+    if (test_memory_save_parsed() != 0) {
+        fprintf(stderr, "test_memory_save_parsed failed\n");
+        return 1;
+    }
+    if (test_memory_save_needs_fields() != 0) {
+        fprintf(stderr, "test_memory_save_needs_fields failed\n");
         return 1;
     }
     if (test_garbage_rejected() != 0) {

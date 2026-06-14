@@ -34,6 +34,8 @@ cap_kind_for_action(const enum spg_action_kind kind) {
         return SPG_POLICY_CAP_SSH_AUTH_PROBE;
     case SPG_ACTION_SIMULATOR:
         return SPG_POLICY_CAP_SIMULATOR;
+    case SPG_ACTION_MEMORY_SAVE:
+        return SPG_POLICY_CAP_MEMORY;
     default:
         return SPG_POLICY_CAP_LOCAL_SHELL;
     }
@@ -41,7 +43,7 @@ cap_kind_for_action(const enum spg_action_kind kind) {
 
 static bool action_kind_valid(const enum spg_action_kind kind) {
     return kind == SPG_ACTION_LOCAL_SHELL || kind == SPG_ACTION_SSH_AUTH_PROBE ||
-           kind == SPG_ACTION_SIMULATOR;
+           kind == SPG_ACTION_SIMULATOR || kind == SPG_ACTION_MEMORY_SAVE;
 }
 
 static uint64_t consumed_for_action(const struct spg_policy_usage *usage,
@@ -52,6 +54,9 @@ static uint64_t consumed_for_action(const struct spg_policy_usage *usage,
     case SPG_ACTION_SSH_AUTH_PROBE:
         return usage->consumed.shell_actions;
     case SPG_ACTION_SIMULATOR:
+        return usage->consumed.sim_actions;
+    case SPG_ACTION_MEMORY_SAVE:
+        /* No dedicated memory budget yet; shares the sim_actions bucket. */
         return usage->consumed.sim_actions;
     default:
         return UINT64_MAX;
@@ -66,6 +71,8 @@ static uint64_t global_budget_for_action(const struct spg_policy_config *policy,
     case SPG_ACTION_SSH_AUTH_PROBE:
         return policy->budgets.shell_actions;
     case SPG_ACTION_SIMULATOR:
+        return policy->budgets.sim_actions;
+    case SPG_ACTION_MEMORY_SAVE:
         return policy->budgets.sim_actions;
     default:
         return 0u;

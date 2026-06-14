@@ -80,6 +80,7 @@ SPG_SOURCES := \
     src/graph/graph.c \
     src/journal/journal.c \
     src/memory/mem_command.c \
+    src/memory/mem_executor.c \
     src/memory/mem_store.c \
     src/memory/memory.c \
     src/model/model_adapter.c \

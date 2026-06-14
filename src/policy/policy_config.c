@@ -138,6 +138,10 @@ static enum spg_status parse_cap_kind(
         *out = SPG_POLICY_CAP_SIMULATOR;
         return SPG_OK;
     }
+    if (spg_sexpr_span_eq_cstr(input_n, input, span, "memory")) {
+        *out = SPG_POLICY_CAP_MEMORY;
+        return SPG_OK;
+    }
     return SPG_E_SCHEMA;
 }
 

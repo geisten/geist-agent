@@ -43,9 +43,17 @@ struct spg_recommendation {
     struct spg_text_span target;
     struct spg_text_span reason;
 
+    /* memory_save fields (spans into the recommendation text). */
+    struct spg_text_span mem_slug;
+    struct spg_text_span mem_description;
+    struct spg_text_span mem_body;
+
     uint64_t confidence_bp;
     bool     has_command;
     bool     has_target;
+    bool     has_slug;
+    bool     has_description;
+    bool     has_body;
 };
 
 struct spg_recommendation_error {

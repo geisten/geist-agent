@@ -2,6 +2,7 @@
 
 #include "sporegeist/exec_command.h"
 #include "sporegeist/mem_command.h"
+#include "sporegeist/mem_store.h"
 
 #include <geist.h>
 
@@ -103,6 +104,8 @@ static const char *policy_capability_kind_name(
         return "ssh_auth_probe";
     case SPG_POLICY_CAP_SIMULATOR:
         return "simulator";
+    case SPG_POLICY_CAP_MEMORY:
+        return "memory";
     }
     return "unknown";
 }
@@ -585,6 +588,8 @@ static const char *action_kind_name(const enum spg_action_kind kind) {
         return "ssh_auth_probe";
     case SPG_ACTION_SIMULATOR:
         return "simulator";
+    case SPG_ACTION_MEMORY_SAVE:
+        return "memory_save";
     }
     return "unknown";
 }
@@ -1320,9 +1325,21 @@ done:
 
 static int run_loop(const char *run_path, const char *fake_output,
                     const size_t ticks, const char *sim_state_path,
-                    const char *run_state_path) {
+                    const char *run_state_path, const char *memory_dir) {
     if (run_path == nullptr || ticks == 0u) {
         return 2;
+    }
+
+    /* Memory store is opt-in: only opened when a directory is configured, so a
+     * plain run never creates one. */
+    struct spg_mem_store mem_store_obj;
+    bool                 have_store = false;
+    if (memory_dir != nullptr && memory_dir[0] != '\0') {
+        have_store = spg_mem_store_open(&mem_store_obj, memory_dir) == SPG_OK;
+        if (!have_store) {
+            fprintf(stderr, "run: cannot open memory dir %s\n", memory_dir);
+            return 1;
+        }
     }
 
     int rc = 1;
@@ -1472,6 +1489,7 @@ static int run_loop(const char *run_path, const char *fake_output,
         .journal       = &journal,
         .model         = &model,
         .sim           = &sim,
+        .store         = have_store ? &mem_store_obj : nullptr,
         .run           = &run,
         .usage         = &usage,
         .policy        = &policy,
@@ -1603,6 +1621,7 @@ static int run_command(int argc, char **argv) {
     const char *fake_output = nullptr;
     const char *sim_state_path = nullptr;
     const char *run_state_path = nullptr;
+    const char *memory_dir     = getenv("SPOREGEIST_MEMORY_DIR");
     size_t ticks = 3u;
     for (int i = 2; i < argc; i += 1) {
         if ((strcmp(argv[i], "--config") == 0 ||
@@ -1636,6 +1655,11 @@ static int run_command(int argc, char **argv) {
             i += 1;
             continue;
         }
+        if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
+            memory_dir = argv[i + 1];
+            i += 1;
+            continue;
+        }
         fprintf(stderr, "run: unknown or incomplete argument: %s\n", argv[i]);
         return 2;
     }
@@ -1643,7 +1667,7 @@ static int run_command(int argc, char **argv) {
         return 2;
     }
     return run_loop(run_path, fake_output, ticks, sim_state_path,
-                    run_state_path);
+                    run_state_path, memory_dir);
 }
 
 int main(int argc, char **argv) {

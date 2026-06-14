@@ -24,6 +24,7 @@ enum spg_policy_capability_kind {
     SPG_POLICY_CAP_LOCAL_SHELL = 0,
     SPG_POLICY_CAP_SSH_AUTH_PROBE,
     SPG_POLICY_CAP_SIMULATOR,
+    SPG_POLICY_CAP_MEMORY,
 };
 
 struct spg_policy_capability {

@@ -2,6 +2,7 @@
 #define SPOREGEIST_ORCHESTRATOR_H
 
 #include "sporegeist/actor.h"
+#include "sporegeist/mem_executor.h"
 #include "sporegeist/policy_gate.h"
 #include "sporegeist/recommendation.h"
 #include "sporegeist/sim_executor.h"
@@ -21,6 +22,7 @@ enum spg_orchestrator_stage {
     SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED,
     SPG_ORCHESTRATOR_STAGE_POLICY_GATED,
     SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED,
+    SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED,
 };
 
 struct spg_orchestrator_state {
@@ -29,6 +31,7 @@ struct spg_orchestrator_state {
     struct spg_journal_writer *journal;
     struct spg_model_adapter  *model;
     struct spg_sim_config     *sim;
+    struct spg_mem_store      *store;
 
     const struct spg_run_config    *run;
     const struct spg_policy_usage  *usage;
@@ -83,10 +86,12 @@ struct spg_orchestrator_result {
     struct spg_recommendation_error  recommendation_error;
     struct spg_policy_gate_result    policy_gate;
     struct spg_sim_executor_result   sim;
+    struct spg_mem_executor_result   memory;
 
     bool recommendation_valid;
     bool policy_evaluated;
     bool sim_executed;
+    bool memory_executed;
 };
 
 [[nodiscard]] enum spg_status

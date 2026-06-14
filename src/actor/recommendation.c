@@ -11,6 +11,9 @@ enum field_id {
     FIELD_REASON,
     FIELD_COMMAND,
     FIELD_TARGET,
+    FIELD_SLUG,
+    FIELD_DESCRIPTION,
+    FIELD_BODY,
     FIELD_COUNT,
     FIELD_UNKNOWN,
 };
@@ -69,6 +72,15 @@ static enum field_id field_for_name(const size_t input_n, const char input[],
     if (spg_sexpr_span_eq_cstr(input_n, input, name, "target")) {
         return FIELD_TARGET;
     }
+    if (spg_sexpr_span_eq_cstr(input_n, input, name, "slug")) {
+        return FIELD_SLUG;
+    }
+    if (spg_sexpr_span_eq_cstr(input_n, input, name, "description")) {
+        return FIELD_DESCRIPTION;
+    }
+    if (spg_sexpr_span_eq_cstr(input_n, input, name, "body")) {
+        return FIELD_BODY;
+    }
     return FIELD_UNKNOWN;
 }
 
@@ -113,6 +125,10 @@ static bool parse_action_kind(const size_t input_n, const char input[],
         *out = SPG_ACTION_SSH_AUTH_PROBE;
         return true;
     }
+    if (spg_sexpr_span_eq_cstr(input_n, input, span, "memory_save")) {
+        *out = SPG_ACTION_MEMORY_SAVE;
+        return true;
+    }
     return false;
 }
 
@@ -132,6 +148,10 @@ static bool kind_fields_match(const struct spg_recommendation *out) {
     case SPG_ACTION_SSH_AUTH_PROBE:
         return out->action.uses_network && !out->has_command &&
                out->has_target;
+    case SPG_ACTION_MEMORY_SAVE:
+        return !out->action.uses_network && !out->has_command &&
+               !out->has_target && out->has_slug && out->has_description &&
+               out->has_body;
     }
     return false;
 }
@@ -325,6 +345,30 @@ enum spg_status spg_recommendation_parse(
                 return SPG_OK;
             }
             rec.has_target = true;
+            break;
+        case FIELD_SLUG:
+            if (!string_payload_span(value, &rec.mem_slug)) {
+                reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
+                       SPG_E_SCHEMA, value_node, value->span.offset);
+                return SPG_OK;
+            }
+            rec.has_slug = true;
+            break;
+        case FIELD_DESCRIPTION:
+            if (!string_payload_span(value, &rec.mem_description)) {
+                reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
+                       SPG_E_SCHEMA, value_node, value->span.offset);
+                return SPG_OK;
+            }
+            rec.has_description = true;
+            break;
+        case FIELD_BODY:
+            if (!string_payload_span(value, &rec.mem_body)) {
+                reject(out, error, SPG_RECOMMENDATION_REJECT_WRONG_VALUE,
+                       SPG_E_SCHEMA, value_node, value->span.offset);
+                return SPG_OK;
+            }
+            rec.has_body = true;
             break;
         case FIELD_COUNT:
         case FIELD_UNKNOWN:

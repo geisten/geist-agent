@@ -64,6 +64,8 @@ const char *spg_orchestrator_stage_to_string(
         return "policy_gated";
     case SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED:
         return "sim_executed";
+    case SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED:
+        return "memory_executed";
     }
     return "unknown";
 }
@@ -170,8 +172,43 @@ enum spg_status spg_orchestrator_tick(
     result->policy_evaluated = true;
     result->stage            = SPG_ORCHESTRATOR_STAGE_POLICY_GATED;
 
-    if (result->policy_gate.decision.kind != SPG_POLICY_DECISION_ALLOW ||
-        result->recommendation.action_kind != SPG_ACTION_SIMULATOR) {
+    if (result->policy_gate.decision.kind != SPG_POLICY_DECISION_ALLOW) {
+        return SPG_OK;
+    }
+
+    if (result->recommendation.action_kind == SPG_ACTION_MEMORY_SAVE) {
+        if (state->store == nullptr) {
+            return SPG_E_INVALID_ARG;
+        }
+        struct spg_mem_executor_state mem_state = {
+            .store   = state->store,
+            .journal = state->journal,
+        };
+        const struct spg_mem_executor_config mem_config = {
+            .actor_id        = config->actor_id,
+            .timestamp_ns    = config->timestamp_ns,
+            .parent_sequence = result->policy_gate.policy_sequence != 0u
+                                   ? result->policy_gate.policy_sequence
+                                   : policy_config.parent_sequence,
+            .write_journal   = config->write_journal,
+        };
+        const struct spg_mem_executor_workspace mem_workspace = {
+            .payload_capacity = workspace->sim_payload_capacity,
+            .payload          = workspace->sim_payload,
+        };
+        status = spg_mem_executor_step(
+            &mem_state, &mem_config, result->actor.model_output_n,
+            workspace->actor.model_output, &result->recommendation,
+            &result->policy_gate.decision, &mem_workspace, &result->memory);
+        if (status != SPG_OK) {
+            return status;
+        }
+        result->memory_executed = true;
+        result->stage           = SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED;
+        return SPG_OK;
+    }
+
+    if (result->recommendation.action_kind != SPG_ACTION_SIMULATOR) {
         return SPG_OK;
     }
     if (state->sim == nullptr) {

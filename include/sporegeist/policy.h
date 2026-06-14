@@ -18,6 +18,7 @@ enum spg_action_kind {
     SPG_ACTION_LOCAL_SHELL = 0,
     SPG_ACTION_SSH_AUTH_PROBE,
     SPG_ACTION_SIMULATOR,
+    SPG_ACTION_MEMORY_SAVE,
 };
 
 enum spg_policy_decision_kind {
