@@ -580,19 +580,23 @@ static void print_risk_summary(const struct spg_risk_score *risk) {
     printf("risk.total=%llu\n", (unsigned long long)risk->total);
 }
 
-static bool parse_positive_size(const char *text, size_t *out) {
+static bool parse_size(const char *text, size_t *out) {
     if (text == nullptr || out == nullptr || text[0] == '\0') {
         return false;
     }
     errno     = 0;
     char *end = nullptr;
     const unsigned long long value = strtoull(text, &end, 10);
-    if (errno == ERANGE || end == text || *end != '\0' || value == 0u ||
+    if (errno == ERANGE || end == text || *end != '\0' ||
         value > (unsigned long long)SIZE_MAX) {
         return false;
     }
     *out = (size_t)value;
     return true;
+}
+
+static bool parse_positive_size(const char *text, size_t *out) {
+    return parse_size(text, out) && *out > 0u;
 }
 
 static void add_budget_u64(uint64_t *value, const uint64_t delta) {
@@ -1713,6 +1717,7 @@ static int agent_command(int argc, char **argv) {
     const char *script_path = nullptr;
     const char *memory_dir  = getenv("SPOREGEIST_MEMORY_DIR");
     size_t      max_steps   = 8u;
+    size_t      max_repairs = 2u;
     bool        allow_exec  = false;
     for (int i = 2; i < argc; i += 1) {
         if ((strcmp(argv[i], "--config") == 0 ||
@@ -1736,6 +1741,15 @@ static int agent_command(int argc, char **argv) {
             i += 1;
             continue;
         }
+        if (strcmp(argv[i], "--max-repairs") == 0 && i + 1 < argc) {
+            if (!parse_size(argv[i + 1], &max_repairs)) {
+                fprintf(stderr, "agent: invalid --max-repairs value: %s\n",
+                        argv[i + 1]);
+                return 2;
+            }
+            i += 1;
+            continue;
+        }
         if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
             memory_dir = argv[i + 1];
             i += 1;
@@ -1751,7 +1765,8 @@ static int agent_command(int argc, char **argv) {
     if (run_path == nullptr || script_path == nullptr) {
         fprintf(stderr,
                 "usage: %s agent --config <run> --fake-script <file> "
-                "[--max-steps N] [--allow-exec] [--memory-dir <d>]\n",
+                "[--max-steps N] [--max-repairs N] [--allow-exec] "
+                "[--memory-dir <d>]\n",
                 argv[0]);
         return 2;
     }
@@ -1935,6 +1950,7 @@ static int agent_command(int argc, char **argv) {
                  .exec_stdout_cap     = sizeof shell_stdout,
                  .exec_stderr_cap     = sizeof shell_stderr},
         .max_steps               = max_steps,
+        .max_repairs             = max_repairs,
         .token_budget            = run.budgets.tokens,
         .journal_header_capacity = sizeof trajectory / sizeof trajectory[0],
         .journal_headers         = trajectory,

@@ -53,4 +53,21 @@ rm "$T/j.sgj"
 grep -q "termination=finished" "$T/agent_denied.out"
 grep -q "denied" "$T/agent_denied.out"
 
+# --- self-repair: a malformed first reply is repaired, then finish ---
+rm "$T/j.sgj"
+cat > "$T/bad_script.txt" <<'EOF'
+this is not a recommendation
+(recommend (kind finish) (reason "task complete"))
+EOF
+"$SPG_BIN" agent --config "$T/run.spg" --fake-script "$T/bad_script.txt" \
+    --max-steps 5 --max-repairs 2 > "$T/agent_repair.out" 2>&1
+grep -q "termination=finished" "$T/agent_repair.out"
+grep -q "steps=2" "$T/agent_repair.out"
+
+# --- with no repair budget the same script terminates rejected ---
+rm "$T/j.sgj"
+"$SPG_BIN" agent --config "$T/run.spg" --fake-script "$T/bad_script.txt" \
+    --max-steps 5 --max-repairs 0 > "$T/agent_norepair.out" 2>&1
+grep -q "termination=rejected" "$T/agent_norepair.out"
+
 echo "test_cli_agent: PASS"

@@ -35,6 +35,13 @@ struct spg_agent_loop_config {
     size_t                         max_steps;
     uint64_t                       token_budget; /* 0 = unlimited */
 
+    /* Self-repair: when a step's recommendation is malformed, write the parse
+     * error into the observation channel and retry instead of terminating, up
+     * to this many times total. 0 = terminate on the first rejection. Repairs
+     * still count against max_steps. Requires an observation buffer in the
+     * workspace (memory_recall_buf). */
+    size_t max_repairs;
+
     /* Optional trajectory feedback: a caller-owned array the loop binds to the
      * journal writer so every event from earlier steps is rendered into the
      * next step's context (the agent sees its own history, not just the last
@@ -45,6 +52,7 @@ struct spg_agent_loop_config {
 
 struct spg_agent_loop_result {
     size_t                          steps_taken;
+    size_t                          repairs_used; /* self-repair retries spent */
     enum spg_agent_loop_termination termination;
     enum spg_status                 last_status; /* last tick status */
     struct spg_orchestrator_result  last;        /* final step's result */

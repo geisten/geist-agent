@@ -94,7 +94,7 @@ static int load_sim(struct spg_sim_config *sim) {
  * is in *out via the result + the returned run status). */
 static int run_script(const struct spg_fake_response *resp, const size_t count,
                       const size_t max_steps, const bool exec_enabled,
-                      struct loop_fixture *fx,
+                      const size_t max_repairs, struct loop_fixture *fx,
                       struct spg_agent_loop_result *out) {
     *fx = (struct loop_fixture){};
     spg_graph_init(&fx->graph);
@@ -179,6 +179,7 @@ static int run_script(const struct spg_fake_response *resp, const size_t count,
                  .exec_stdout_cap     = sizeof fx->shell_stdout,
                  .exec_stderr_cap     = sizeof fx->shell_stderr},
         .max_steps               = max_steps,
+        .max_repairs             = max_repairs,
         .journal_header_capacity = sizeof fx->trajectory / sizeof fx->trajectory[0],
         .journal_headers         = fx->trajectory,
     };
@@ -211,7 +212,7 @@ static int test_finish_terminates(void) {
     };
     struct loop_fixture          fx = {};
     struct spg_agent_loop_result out = {};
-    if (run_script(script, 3u, 5u, true, &fx, &out) != 0) {
+    if (run_script(script, 3u, 5u, true, 0u, &fx, &out) != 0) {
         teardown(&fx);
         return 1;
     }
@@ -233,7 +234,7 @@ static int test_max_steps(void) {
     };
     struct loop_fixture          fx = {};
     struct spg_agent_loop_result out = {};
-    if (run_script(script, 2u, 2u, false, &fx, &out) != 0) {
+    if (run_script(script, 2u, 2u, false, 0u, &fx, &out) != 0) {
         teardown(&fx);
         return 1;
     }
@@ -252,7 +253,7 @@ static int test_denied(void) {
     };
     struct loop_fixture          fx = {};
     struct spg_agent_loop_result out = {};
-    if (run_script(script, 1u, 5u, false, &fx, &out) != 0) {
+    if (run_script(script, 1u, 5u, false, 0u, &fx, &out) != 0) {
         teardown(&fx);
         return 1;
     }
@@ -270,7 +271,7 @@ static int test_rejected(void) {
     };
     struct loop_fixture          fx = {};
     struct spg_agent_loop_result out = {};
-    if (run_script(script, 1u, 5u, false, &fx, &out) != 0) {
+    if (run_script(script, 1u, 5u, false, 0u, &fx, &out) != 0) {
         teardown(&fx);
         return 1;
     }
@@ -292,7 +293,7 @@ static int test_trajectory_feedback(void) {
     };
     struct loop_fixture          fx = {};
     struct spg_agent_loop_result out = {};
-    if (run_script(script, 2u, 5u, false, &fx, &out) != 0) {
+    if (run_script(script, 2u, 5u, false, 0u, &fx, &out) != 0) {
         teardown(&fx);
         return 1;
     }
@@ -307,9 +308,59 @@ static int test_trajectory_feedback(void) {
     return ok;
 }
 
+static int test_self_repair(void) {
+    /* A malformed first reply is repaired (error fed back) rather than ending
+     * the run; the second, valid reply finishes the task. */
+    static const struct spg_fake_response script[] = {
+        FR("this is not a recommendation"),
+        FR("(recommend (kind finish) (reason \"done\"))"),
+    };
+    struct loop_fixture          fx = {};
+    struct spg_agent_loop_result out = {};
+    if (run_script(script, 2u, 5u, false, 1u, &fx, &out) != 0) {
+        teardown(&fx);
+        return 1;
+    }
+    const int ok = (out.termination == SPG_AGENT_LOOP_FINISHED &&
+                    out.steps_taken == 2u && out.repairs_used == 1u &&
+                    strstr(fx.context, "invalid recommendation") != nullptr)
+                       ? 0
+                       : 1;
+    teardown(&fx);
+    return ok;
+}
+
+static int test_repair_budget_exhausted(void) {
+    /* With no repair budget, the first malformed reply terminates the run. */
+    static const struct spg_fake_response script[] = {
+        FR("garbage"),
+        FR("(recommend (kind finish) (reason \"done\"))"),
+    };
+    struct loop_fixture          fx = {};
+    struct spg_agent_loop_result out = {};
+    if (run_script(script, 2u, 5u, false, 0u, &fx, &out) != 0) {
+        teardown(&fx);
+        return 1;
+    }
+    const int ok = (out.termination == SPG_AGENT_LOOP_REJECTED &&
+                    out.steps_taken == 1u && out.repairs_used == 0u)
+                       ? 0
+                       : 1;
+    teardown(&fx);
+    return ok;
+}
+
 int main(void) {
     if (test_finish_terminates() != 0) {
         fprintf(stderr, "test_finish_terminates failed\n");
+        return 1;
+    }
+    if (test_self_repair() != 0) {
+        fprintf(stderr, "test_self_repair failed\n");
+        return 1;
+    }
+    if (test_repair_budget_exhausted() != 0) {
+        fprintf(stderr, "test_repair_budget_exhausted failed\n");
         return 1;
     }
     if (test_trajectory_feedback() != 0) {

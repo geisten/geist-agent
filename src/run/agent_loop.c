@@ -1,5 +1,7 @@
 #include "sporegeist/agent_loop.h"
 
+#include <stdio.h>
+
 static void add_u64(uint64_t *acc, const uint64_t v) {
     if (*acc > UINT64_MAX - v) {
         *acc = UINT64_MAX;
@@ -137,6 +139,22 @@ enum spg_status spg_agent_loop_run(
         }
         if (step_result.stage ==
             SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED) {
+            /* Self-repair: surface the parse error as the next observation and
+             * retry, rather than giving up on one malformed reply. */
+            if (result->repairs_used < config->max_repairs &&
+                workspace->memory_recall_buf != nullptr &&
+                workspace->memory_recall_capacity > 0u) {
+                (void)snprintf(
+                    workspace->memory_recall_buf,
+                    workspace->memory_recall_capacity,
+                    "[invalid recommendation: %s] Reply with exactly one valid "
+                    "(recommend ...) form, or (recommend (kind finish) "
+                    "(reason \"...\")).",
+                    spg_recommendation_reject_reason_to_string(
+                        step_result.recommendation.reject_reason));
+                result->repairs_used += 1u;
+                continue;
+            }
             result->termination = SPG_AGENT_LOOP_REJECTED;
             return SPG_OK;
         }
