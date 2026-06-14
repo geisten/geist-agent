@@ -64,6 +64,7 @@ SPG_SOURCES := \
     src/actor/actor.c \
     src/actor/recommendation.c \
     src/chat/chat_template.c \
+    src/chat/chat_tools.c \
     src/core/allocator.c \
     src/core/budget_config.c \
     src/core/hash.c \

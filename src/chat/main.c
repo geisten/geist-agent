@@ -1,6 +1,7 @@
 #include "sporegeist/sporegeist.h"
 
 #include "sporegeist/chat_template.h"
+#include "sporegeist/chat_tools.h"
 #include "sporegeist/mem_store.h"
 #include "sporegeist/model_adapter.h"
 #include "sporegeist/model_resolve.h"
@@ -17,6 +18,7 @@
 #define CHAT_LINE_BYTES    4096u
 #define CHAT_OUTPUT_BYTES  16384u
 #define CHAT_HISTORY_BYTES 6144u /* ~ the CHAT_MAX_SEQ_LEN token budget */
+#define CHAT_MAX_TOOL_ITERS 5u   /* bound on in-turn tool calls */
 #define CHAT_DEF_TOKENS    256u
 #define CHAT_MAX_SEQ_LEN   2048u
 
@@ -424,10 +426,16 @@ int main(int argc, char **argv) {
                 static char idx[2048];
                 bool        tr = false;
                 (void)spg_mem_index(&mem, sizeof idx, idx, nullptr, &tr);
-                if (idx[0] != '\0') {
-                    (void)snprintf(composed, sizeof composed,
-                                   "[memory index]\n%s[/memory index]\n\n", idx);
-                }
+                (void)snprintf(
+                    composed, sizeof composed,
+                    "[tools] To use memory, reply with exactly one "
+                    "s-expression and nothing else: (tool memory_list) | "
+                    "(tool memory_read (slug \"...\")) | (tool memory_save "
+                    "(slug \"...\") (description \"...\") (body \"...\")) | "
+                    "(tool memory_delete (slug \"...\")). The result returns "
+                    "as [tool_result]; then answer the user normally.\n"
+                    "[memory index]\n%s[/memory index]\n\n",
+                    idx);
                 index_injected = true;
             }
             if (pending[0] != '\0') {
@@ -446,24 +454,58 @@ int main(int argc, char **argv) {
             reset  = true;
         }
 
-        const struct spg_model_generate_request req = {
-            .prompt            = prompt,
-            .prompt_n          = strlen(prompt),
-            .reset_session     = reset,
-            .max_decode_tokens = args.max_tokens,
-        };
-        struct spg_model_generate_result result = {
-            .output_capacity = sizeof output,
-            .output          = output,
-        };
-        const enum spg_status gstatus =
-            spg_model_generate(&adapter, &req, &result);
+        /* Generate, then run any in-turn (tool ...) calls the model emits,
+         * feeding each result back, until it answers normally (bounded). */
+        struct spg_model_generate_result result  = {};
+        enum spg_status                  gstatus = SPG_E_INTERNAL;
+        size_t                           tool_iters = 0u;
+        for (;;) {
+            result = (struct spg_model_generate_result){
+                .output_capacity = sizeof output,
+                .output          = output,
+            };
+            const struct spg_model_generate_request req = {
+                .prompt            = prompt,
+                .prompt_n          = strlen(prompt),
+                .reset_session     = reset,
+                .max_decode_tokens = args.max_tokens,
+            };
+            gstatus = spg_model_generate(&adapter, &req, &result);
+            if (gstatus != SPG_OK && gstatus != SPG_E_LIMIT) {
+                break;
+            }
+            if (!args.fake) {
+                trim_at_stop_markers(output);
+            }
+            if (args.fake || !have_mem || tool_iters >= CHAT_MAX_TOOL_ITERS) {
+                break;
+            }
+            static char tool_result[CHAT_OUTPUT_BYTES];
+            bool        was_tool = false;
+            (void)spg_chat_tool_dispatch(&mem, strlen(output), output,
+                                         sizeof tool_result, tool_result,
+                                         &was_tool);
+            if (!was_tool) {
+                break;
+            }
+            printf("assistant> (tool: %.*s)\n", (int)strcspn(output, "\n"),
+                   output);
+            (void)spg_chat_history_add_assistant(&history, output);
+            char feedback[2048];
+            (void)snprintf(feedback, sizeof feedback, "[tool_result]\n%s",
+                           tool_result);
+            if (spg_chat_history_add_user(&history, feedback) != SPG_OK) {
+                break;
+            }
+            prompt = spg_chat_history_text(&history);
+            reset  = true;
+            tool_iters += 1u;
+        }
 
         const char *reply =
             gstatus == SPG_OK || gstatus == SPG_E_LIMIT ? output : nullptr;
         if (reply != nullptr) {
             if (!args.fake) {
-                trim_at_stop_markers(output);
                 (void)spg_chat_history_add_assistant(&history, output);
                 (void)snprintf(last_reply, sizeof last_reply, "%s", output);
             }
