@@ -1,5 +1,6 @@
 #include "sporegeist/sporegeist.h"
 
+#include "sporegeist/chat_template.h"
 #include "sporegeist/model_adapter.h"
 #include "sporegeist/model_resolve.h"
 #include "sporegeist/status.h"
@@ -12,10 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CHAT_LINE_BYTES   4096u
-#define CHAT_OUTPUT_BYTES 16384u
-#define CHAT_DEF_TOKENS   256u
-#define CHAT_MAX_SEQ_LEN  2048u
+#define CHAT_LINE_BYTES    4096u
+#define CHAT_OUTPUT_BYTES  16384u
+#define CHAT_HISTORY_BYTES 6144u /* ~ the CHAT_MAX_SEQ_LEN token budget */
+#define CHAT_DEF_TOKENS    256u
+#define CHAT_MAX_SEQ_LEN   2048u
 
 #ifndef PATH_MAX
 #    define PATH_MAX 4096
@@ -80,14 +82,6 @@ static void trim_newline(char *line) {
     if (n > 0u && line[n - 1u] == '\n') {
         line[n - 1u] = '\0';
     }
-}
-
-/* Wrap a user message in Gemma's instruction chat template so the instruct
- * model produces a real reply (rather than emitting control tokens). */
-static void format_prompt(char *buf, size_t cap, const char *user) {
-    (void)snprintf(buf, cap,
-                   "<start_of_turn>user\n%s<end_of_turn>\n<start_of_turn>model\n",
-                   user);
 }
 
 /* geist renders Gemma's turn/EOS tokens as literal surface text, so cut the
@@ -245,10 +239,12 @@ int main(int argc, char **argv) {
     }
 
     puts("sporegeist-chat ready. Type /quit to exit, /reset to clear context.");
-    char   line[CHAT_LINE_BYTES];
-    char   output[CHAT_OUTPUT_BYTES];
-    bool   reset_next = false;
-    int    rc         = 0;
+    char                    line[CHAT_LINE_BYTES];
+    char                    output[CHAT_OUTPUT_BYTES];
+    char                    history_buf[CHAT_HISTORY_BYTES];
+    struct spg_chat_history history;
+    spg_chat_history_init(&history, sizeof history_buf, history_buf);
+    int rc = 0;
     for (;;) {
         fputs("user> ", stdout);
         fflush(stdout);
@@ -260,7 +256,7 @@ int main(int argc, char **argv) {
             break;
         }
         if (strcmp(line, "/reset") == 0) {
-            reset_next = true;
+            spg_chat_history_reset(&history);
             puts("assistant> (context cleared)");
             continue;
         }
@@ -273,16 +269,23 @@ int main(int argc, char **argv) {
             break;
         }
 
-        char prompt[CHAT_LINE_BYTES + 64u];
-        if (args.fake) {
-            (void)snprintf(prompt, sizeof prompt, "%s", line);
-        } else {
-            format_prompt(prompt, sizeof prompt, line);
+        /* Real path: feed the whole templated transcript each turn (reset +
+         * re-prefill). Fake path: just echo the raw line. */
+        const char *prompt = line;
+        bool        reset  = false;
+        if (!args.fake) {
+            if (spg_chat_history_add_user(&history, line) != SPG_OK) {
+                puts("assistant> (message too long for the context window)");
+                continue;
+            }
+            prompt = spg_chat_history_text(&history);
+            reset  = true;
         }
+
         const struct spg_model_generate_request req = {
             .prompt            = prompt,
             .prompt_n          = strlen(prompt),
-            .reset_session     = reset_next,
+            .reset_session     = reset,
             .max_decode_tokens = args.max_tokens,
         };
         struct spg_model_generate_result result = {
@@ -291,13 +294,13 @@ int main(int argc, char **argv) {
         };
         const enum spg_status gstatus =
             spg_model_generate(&adapter, &req, &result);
-        reset_next = false;
 
         const char *reply =
             gstatus == SPG_OK || gstatus == SPG_E_LIMIT ? output : nullptr;
         if (reply != nullptr) {
             if (!args.fake) {
                 trim_at_stop_markers(output);
+                (void)spg_chat_history_add_assistant(&history, output);
             }
             printf("assistant> %s%s\n", reply,
                    result.output_truncated ? " …[truncated]" : "");

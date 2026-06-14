@@ -63,6 +63,7 @@ LDLIBS := $(GEIST_LINK_FLAGS) -lm -lpthread
 SPG_SOURCES := \
     src/actor/actor.c \
     src/actor/recommendation.c \
+    src/chat/chat_template.c \
     src/core/allocator.c \
     src/core/budget_config.c \
     src/core/hash.c \
