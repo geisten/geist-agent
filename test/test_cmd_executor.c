@@ -1,10 +1,16 @@
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE 1
+#endif
 
 #include "sporegeist/cmd_executor.h"
 
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static uint64_t now_ms(void) {
     struct timespec ts = {};
@@ -179,7 +185,61 @@ static int test_invalid_args(void) {
     return (!badres.started && badres.status == SPG_E_INVALID_ARG) ? 0 : 1;
 }
 
+static int test_file_size_limit(void) {
+    char tmpl[] = "/tmp/spg_fsz_XXXXXX";
+    const int fd = mkstemp(tmpl);
+    if (fd < 0) {
+        return 1;
+    }
+    (void)close(fd);
+    char ofarg[80];
+    (void)snprintf(ofarg, sizeof ofarg, "of=%s", tmpl);
+    /* dd would write 10 MiB, but the file-size cap is 64 KiB -> SIGXFSZ. */
+    const char *const argv[] = {"dd", "if=/dev/zero", ofarg, "bs=1048576",
+                                "count=10"};
+    char                   out[16] = {0};
+    char                   err[256] = {0};
+    struct spg_cmd_request req =
+        make_req(argv, 5u, 5000u, out, sizeof out, err, sizeof err);
+    req.limits.file_bytes = 65536u;
+    struct spg_cmd_result res = {};
+    const enum spg_status rc = spg_cmd_executor_run(1u, &req, &res);
+    (void)unlink(tmpl);
+    if (rc != SPG_OK) {
+        return 1;
+    }
+    /* The child started, was not a normal exit, and died from the file-size
+     * signal. */
+    return (res.started && !res.exited && res.term_signal == SIGXFSZ) ? 0 : 1;
+}
+
+static int test_clear_env(void) {
+    const char *const argv[] = {"env"};
+    char              out[256] = {0};
+    char              err[64] = {0};
+    struct spg_cmd_request req =
+        make_req(argv, 1u, 2000u, out, sizeof out, err, sizeof err);
+    req.clear_env = true;
+    struct spg_cmd_result res = {};
+    if (spg_cmd_executor_run(1u, &req, &res) != SPG_OK) {
+        return 1;
+    }
+    /* env was resolved via PATH but ran with an empty environment: no output. */
+    return (res.started && res.exited && res.exit_code == 0 &&
+            res.stdout_len == 0u)
+               ? 0
+               : 1;
+}
+
 int main(void) {
+    if (test_file_size_limit() != 0) {
+        fprintf(stderr, "test_file_size_limit failed\n");
+        return 1;
+    }
+    if (test_clear_env() != 0) {
+        fprintf(stderr, "test_clear_env failed\n");
+        return 1;
+    }
     if (test_echo_stdout() != 0) {
         fprintf(stderr, "test_echo_stdout failed\n");
         return 1;

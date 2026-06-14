@@ -17,6 +17,29 @@ extern "C" {
 #define SPG_CMD_MAX_BATCH 32u
 #define SPG_CMD_MAX_ARGS  64u
 
+/* OS-level resource limits applied to the child before exec (setrlimit), so a
+ * runaway command cannot exhaust the host. Each field is a hard cap; 0 leaves
+ * that limit at the inherited default. Enforcement is best-effort and
+ * platform-dependent (e.g. RLIMIT_AS is weakly enforced on macOS) — a limit the
+ * OS ignores is simply not applied. */
+struct spg_cmd_limits {
+    uint64_t cpu_seconds;   /* RLIMIT_CPU: max CPU seconds (SIGXCPU on exceed) */
+    uint64_t address_bytes; /* RLIMIT_AS: max virtual memory */
+    uint64_t file_bytes;    /* RLIMIT_FSIZE: max file written (SIGXFSZ) */
+    uint64_t process_count; /* RLIMIT_NPROC: max processes for the user */
+};
+
+/* Conservative default caps for governed shell commands. CPU and file size are
+ * non-breaking and always useful; address space bounds egregious memory bombs
+ * (best-effort on macOS). process_count is left at 0 (a fixed RLIMIT_NPROC is
+ * relative to the whole user, a footgun on busy hosts) — fork bombs are bounded
+ * instead by the wall timeout plus the process-group kill. */
+#define SPG_CMD_DEFAULT_LIMITS                                                  \
+    ((struct spg_cmd_limits){.cpu_seconds   = 30u,                             \
+                             .address_bytes = 2147483648u, /* 2 GiB */          \
+                             .file_bytes    = 67108864u,   /* 64 MiB */         \
+                             .process_count = 0u})
+
 /* One command to run. The caller owns argv and the output buffers for the
  * lifetime of the call. argv holds argc entries (argv[0] is the program,
  * resolved through PATH); it need not be NUL-terminated. */
@@ -27,6 +50,8 @@ struct spg_cmd_request {
     const char *working_dir; /* nullptr inherits the caller's cwd */
     uint64_t    timeout_ms;  /* 0 means no timeout */
     bool        clear_env;   /* run with an empty environment */
+
+    struct spg_cmd_limits limits; /* OS resource caps (all 0 = inherited) */
 
     size_t stdout_cap; /* bytes of stdout_buf, including the terminator */
     char  *stdout_buf; /* receives captured stdout, NUL-terminated on return */

@@ -161,6 +161,7 @@ enum spg_status spg_shell_executor_step(
         .working_dir = config->working_dir,
         .timeout_ms  = config->timeout_ms,
         .clear_env   = false,
+        .limits      = SPG_CMD_DEFAULT_LIMITS,
         .stdout_cap  = workspace->stdout_capacity,
         .stdout_buf  = workspace->stdout_buf,
         .stderr_cap  = workspace->stderr_capacity,

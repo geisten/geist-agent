@@ -153,6 +153,7 @@ int spg_exec_command(const int argc, char **argv) {
         .working_dir = nullptr,
         .timeout_ms = timeout_ms,
         .clear_env  = false,
+        .limits     = SPG_CMD_DEFAULT_LIMITS,
         .stdout_cap = sizeof stdout_buf,
         .stdout_buf = stdout_buf,
         .stderr_cap = sizeof stderr_buf,
