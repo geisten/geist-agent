@@ -70,6 +70,23 @@ const char *spg_orchestrator_stage_to_string(
     return "unknown";
 }
 
+/* The derived predicates below treat `stage` as a progress counter: a tick is
+ * "valid"/"gated" once it reaches POLICY_GATED, so every pre-gate or rejected
+ * stage must sort below it and every executed stage at or above it. Pin that
+ * ordering so a future reorder cannot silently flip the predicates. */
+static_assert(SPG_ORCHESTRATOR_STAGE_NOT_STARTED <
+                      SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
+                  SPG_ORCHESTRATOR_STAGE_ACTOR_DONE <
+                      SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
+                  SPG_ORCHESTRATOR_STAGE_RECOMMENDATION_REJECTED <
+                      SPG_ORCHESTRATOR_STAGE_POLICY_GATED &&
+                  SPG_ORCHESTRATOR_STAGE_POLICY_GATED <=
+                      SPG_ORCHESTRATOR_STAGE_SIM_EXECUTED &&
+                  SPG_ORCHESTRATOR_STAGE_POLICY_GATED <=
+                      SPG_ORCHESTRATOR_STAGE_MEMORY_EXECUTED,
+              "orchestrator stage ordering: pre-gate/rejected stages must sort "
+              "below POLICY_GATED and executed stages at or above it");
+
 bool spg_orchestrator_recommendation_valid(
     const struct spg_orchestrator_result *result) {
     return result->stage >= SPG_ORCHESTRATOR_STAGE_POLICY_GATED;

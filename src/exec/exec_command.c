@@ -100,20 +100,7 @@ int spg_exec_command(const int argc, char **argv) {
                          : EXEC_MAX_TIMEOUT;
     }
 
-    /* Synthesize the recommendation + allow decision the boundary guards. */
-    struct spg_recommendation rec = {
-        .state       = SPG_RECOMMENDATION_VALID,
-        .action_kind = SPG_ACTION_LOCAL_SHELL,
-        .action      = {.kind         = SPG_ACTION_LOCAL_SHELL,
-                        .uses_network = uses_network},
-        .command     = {.offset = 0u, .length = strlen(argv[0])},
-        .has_command = true,
-    };
-    const struct spg_policy_decision decision = {
-        .kind             = SPG_POLICY_DECISION_ALLOW,
-        .deny_reason      = SPG_POLICY_DENY_NONE,
-        .capability_index = 0u,
-    };
+    /* Gate the free-form shell command through the shared boundary. */
     const struct spg_executor_boundary_config bcfg = {
         .execution_enabled     = true,
         .allowed_workdir_prefix = "/",
@@ -130,8 +117,8 @@ int spg_exec_command(const int argc, char **argv) {
         .env_cleared        = false,
     };
     struct spg_executor_boundary_plan plan = {};
-    if (spg_executor_boundary_check(&bcfg, &rec, &decision, &breq, &plan) !=
-        SPG_OK) {
+    if (spg_executor_boundary_check_shell(&bcfg, argv[0], uses_network, &breq,
+                                          &plan) != SPG_OK) {
         fprintf(stderr, "exec: internal boundary error\n");
         return 4;
     }

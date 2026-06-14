@@ -75,6 +75,12 @@ static size_t split_ws(char *s, const char *argv[], const size_t max) {
 static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
                      bool allow_exec, char out[], const size_t out_cap,
                      size_t input_n) {
+    if (!allow_exec) {
+        (void)snprintf(out, out_cap,
+                       "error: exec is disabled (start sporegeist-chat with "
+                       "--allow-exec)");
+        return;
+    }
     struct spg_text_span cspan;
     if (!arg_string(input_n, input, nodes, 0u, "command", &cspan)) {
         (void)snprintf(out, out_cap, "error: exec needs (command \"...\")");
@@ -90,20 +96,8 @@ static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
     }
 
     /* Gate the run through the shared executor boundary -- the single place
-     * that decides whether a shell command may run -- rather than a bare flag,
-     * so the chat tool and the CLI exec command enforce the same contract. */
-    const struct spg_recommendation rec = {
-        .state       = SPG_RECOMMENDATION_VALID,
-        .action_kind = SPG_ACTION_LOCAL_SHELL,
-        .action      = {.kind = SPG_ACTION_LOCAL_SHELL, .uses_network = false},
-        .command     = {.offset = 0u, .length = strlen(argv[0])},
-        .has_command = true,
-    };
-    const struct spg_policy_decision decision = {
-        .kind             = SPG_POLICY_DECISION_ALLOW,
-        .deny_reason      = SPG_POLICY_DENY_NONE,
-        .capability_index = 0u,
-    };
+     * that decides whether a shell command may run -- so the chat tool and the
+     * CLI exec command enforce the same contract. */
     const struct spg_executor_boundary_config bcfg = {
         .execution_enabled      = allow_exec,
         .allowed_workdir_prefix = "/",
@@ -120,20 +114,14 @@ static void run_exec(const char *input, const struct spg_sexpr_node *nodes,
         .env_cleared        = false,
     };
     struct spg_executor_boundary_plan plan = {};
-    if (spg_executor_boundary_check(&bcfg, &rec, &decision, &breq, &plan) !=
+    if (spg_executor_boundary_check_shell(&bcfg, argv[0], false, &breq, &plan) !=
         SPG_OK) {
         (void)snprintf(out, out_cap, "error: exec internal boundary error");
         return;
     }
     if (!plan.approved) {
-        if (plan.reason == SPG_EXECUTOR_BOUNDARY_EXECUTION_DISABLED) {
-            (void)snprintf(out, out_cap,
-                           "error: exec is disabled (start sporegeist-chat "
-                           "with --allow-exec)");
-        } else {
-            (void)snprintf(out, out_cap, "error: exec denied (%s)",
-                           spg_executor_boundary_reason_to_string(plan.reason));
-        }
+        (void)snprintf(out, out_cap, "error: exec denied (%s)",
+                       spg_executor_boundary_reason_to_string(plan.reason));
         return;
     }
 

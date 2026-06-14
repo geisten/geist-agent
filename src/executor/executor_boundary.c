@@ -104,3 +104,22 @@ enum spg_status spg_executor_boundary_check(
     allow(plan);
     return SPG_OK;
 }
+
+enum spg_status spg_executor_boundary_check_shell(
+    const struct spg_executor_boundary_config *config, const char *command,
+    const bool uses_network,
+    const struct spg_executor_boundary_request *request,
+    struct spg_executor_boundary_plan *plan) {
+    const struct spg_recommendation rec = {
+        .state       = SPG_RECOMMENDATION_VALID,
+        .action_kind = SPG_ACTION_LOCAL_SHELL,
+        .action      = {.uses_network = uses_network},
+        .command     = {.offset = 0u,
+                        .length = command != nullptr ? strlen(command) : 0u},
+        .has_command = command != nullptr && command[0] != '\0',
+    };
+    const struct spg_policy_decision decision = {
+        .kind = SPG_POLICY_DECISION_ALLOW,
+    };
+    return spg_executor_boundary_check(config, &rec, &decision, request, plan);
+}

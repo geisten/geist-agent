@@ -57,6 +57,19 @@ struct spg_executor_boundary_plan {
     const struct spg_executor_boundary_request *request,
     struct spg_executor_boundary_plan *plan);
 
+/* Gate a free-form local-shell command that has no backing model recommendation
+ * or policy evaluation (the CLI `exec` command and the chat exec tool).
+ * Synthesizes the VALID local-shell recommendation and ALLOW decision the
+ * boundary expects -- so callers never forge policy-layer structs -- then runs
+ * the same spg_executor_boundary_check. `command` is the argv[0] being gated (a
+ * null or empty command yields a MISSING_COMMAND denial); uses_network marks
+ * whether it reaches the network. config and request carry the sandbox limits
+ * the caller enforces. */
+[[nodiscard]] enum spg_status spg_executor_boundary_check_shell(
+    const struct spg_executor_boundary_config *config, const char *command,
+    bool uses_network, const struct spg_executor_boundary_request *request,
+    struct spg_executor_boundary_plan *plan);
+
 [[nodiscard]] const char *spg_executor_boundary_reason_to_string(
     enum spg_executor_boundary_reason reason);
 
