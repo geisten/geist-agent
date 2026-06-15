@@ -2086,6 +2086,7 @@ static enum spg_status eval_run_suite(const char *suite_path,
     struct file_buffer scenario_text = {};
     char              *policy_path   = nullptr;
     char              *scenario_path = nullptr;
+    char              *model_path    = nullptr;
     enum spg_status    rc            = SPG_E_IO;
 
     enum spg_status status = read_file(suite_path, &suite_text);
@@ -2121,6 +2122,10 @@ static enum spg_status eval_run_suite(const char *suite_path,
     if (status == SPG_OK) {
         status = span_to_cstr(run_text.n, run_text.data, run.scenario_path,
                               &scenario_path);
+    }
+    if (status == SPG_OK) {
+        status =
+            span_to_cstr(run_text.n, run_text.data, run.model_path, &model_path);
     }
     if (status != SPG_OK) {
         rc = status;
@@ -2204,11 +2209,9 @@ static enum spg_status eval_run_suite(const char *suite_path,
         char obs[256];
         (void)eval_str(nod, c, suite_text.n, suite_text.data, "name", name,
                        sizeof report->names[0]);
-        if (!eval_str(nod, c, suite_text.n, suite_text.data, "script",
-                      script_path, sizeof script_path)) {
-            rc = SPG_E_FORMAT;
-            goto done;
-        }
+        const bool has_script =
+            eval_str(nod, c, suite_text.n, suite_text.data, "script",
+                     script_path, sizeof script_path);
         uint64_t max_steps   = 8u;
         uint64_t max_repairs = 0u;
         (void)eval_u64(nod, c, suite_text.n, suite_text.data, "max_steps",
@@ -2250,15 +2253,6 @@ static enum spg_status eval_run_suite(const char *suite_path,
             }
         }
 
-        struct file_buffer script_text = {};
-        if (read_file(script_path, &script_text) != SPG_OK) {
-            rc = SPG_E_IO;
-            goto done;
-        }
-        static struct spg_fake_response script[EVAL_SCRIPT_MAX];
-        const size_t script_n = split_script_lines(
-            script_text.data, script_text.n, script, EVAL_SCRIPT_MAX);
-
         const struct spg_agent_run_config rcfg = {
             .max_steps         = (size_t)max_steps,
             .max_repairs       = (size_t)max_repairs,
@@ -2269,12 +2263,64 @@ static enum spg_status eval_run_suite(const char *suite_path,
             .context_refs      = CLI_CONTEXT_REFS,
         };
         struct spg_eval_case_result *res = &report->results[report->total];
-        const enum spg_status        cs  = spg_eval_run_case(
-            script, script_n, gate_marker, &inputs, &rcfg, &ws, &expect, res);
-        free_file_buffer(&script_text);
-        if (cs != SPG_OK) {
-            rc = cs;
-            goto done;
+
+        char       model_kind[16];
+        const bool geist_case =
+            eval_str(nod, c, suite_text.n, suite_text.data, "model", model_kind,
+                     sizeof model_kind) &&
+            strcmp(model_kind, "geist") == 0;
+        if (geist_case) {
+            /* Real-model task case: run the actual engine against the scenario
+             * (non-deterministic, needs the GGUF), then score it the same way. */
+            struct spg_model_adapter            model = {};
+            const struct spg_model_adapter_config mc = {
+                .kind       = SPG_MODEL_ADAPTER_GEIST,
+                .model_path = model_path,
+                .sampling   = {.max_seq_len = 4096u,
+                               .temperature = 0.0f,
+                               .top_p       = 1.0f,
+                               .top_k       = 0,
+                               .random_seed = run.seed},
+            };
+            if (spg_model_adapter_init(&model, &mc) != SPG_OK) {
+                rc = SPG_E_MODEL;
+                goto done;
+            }
+            struct spg_agent_run_inputs gin = inputs;
+            gin.model                       = &model;
+            struct spg_policy_usage      usage = {};
+            struct spg_agent_loop_result loop  = {};
+            const enum spg_status s = spg_agent_run(&gin, &rcfg, &ws, &usage,
+                                                    &loop);
+            spg_model_adapter_destroy(&model);
+            *res = (struct spg_eval_case_result){
+                .outcome = spg_eval_judge(&expect, &loop, s, observation),
+                .termination  = loop.termination,
+                .steps_taken  = loop.steps_taken,
+                .repairs_used = loop.repairs_used,
+                .status       = s,
+            };
+        } else {
+            if (!has_script) {
+                rc = SPG_E_FORMAT; /* a scripted case needs a script */
+                goto done;
+            }
+            struct file_buffer script_text = {};
+            if (read_file(script_path, &script_text) != SPG_OK) {
+                rc = SPG_E_IO;
+                goto done;
+            }
+            static struct spg_fake_response script[EVAL_SCRIPT_MAX];
+            const size_t script_n = split_script_lines(
+                script_text.data, script_text.n, script, EVAL_SCRIPT_MAX);
+            const enum spg_status cs = spg_eval_run_case(
+                script, script_n, gate_marker, &inputs, &rcfg, &ws, &expect,
+                res);
+            free_file_buffer(&script_text);
+            if (cs != SPG_OK) {
+                rc = cs;
+                goto done;
+            }
         }
         if (res->outcome == SPG_EVAL_PASS) {
             report->passed += 1u;
@@ -2285,6 +2331,7 @@ static enum spg_status eval_run_suite(const char *suite_path,
 done:
     free(policy_path);
     free(scenario_path);
+    free(model_path);
     free_file_buffer(&suite_text);
     free_file_buffer(&run_text);
     free_file_buffer(&policy_text);

@@ -18,10 +18,10 @@ const char *spg_eval_outcome_to_string(const enum spg_eval_outcome o) {
     return "unknown";
 }
 
-static enum spg_eval_outcome judge(const struct spg_eval_expect *expect,
-                                   const struct spg_agent_loop_result *loop,
-                                   const enum spg_status status,
-                                   const char *observation) {
+enum spg_eval_outcome spg_eval_judge(const struct spg_eval_expect *expect,
+                                     const struct spg_agent_loop_result *loop,
+                                     const enum spg_status status,
+                                     const char *observation) {
     if (status != SPG_OK) {
         return SPG_EVAL_FAIL_RUN_ERROR;
     }
@@ -79,6 +79,7 @@ spg_eval_run_case(const struct spg_fake_response *script, const size_t script_n,
     result->termination  = loop.termination;
     result->steps_taken  = loop.steps_taken;
     result->repairs_used = loop.repairs_used;
-    result->outcome = judge(expect, &loop, status, workspace->observation);
+    result->outcome =
+        spg_eval_judge(expect, &loop, status, workspace->observation);
     return SPG_OK;
 }

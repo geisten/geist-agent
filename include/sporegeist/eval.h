@@ -45,6 +45,14 @@ struct spg_eval_case_result {
 
 [[nodiscard]] const char *spg_eval_outcome_to_string(enum spg_eval_outcome o);
 
+/* Judge a finished run against expectations (termination, step bounds, an
+ * observation substring). Exposed so callers that drive the run themselves —
+ * e.g. a real-model task case via spg_agent_run — score it the same way. */
+[[nodiscard]] enum spg_eval_outcome
+spg_eval_judge(const struct spg_eval_expect *expect,
+               const struct spg_agent_loop_result *loop, enum spg_status status,
+               const char *observation);
+
 /* Build a scripted fake model from script[0..script_n), run one governed agent
  * case via spg_agent_run against inputs/config (inputs->model is ignored and
  * replaced by the scripted fake), and check it against expect. The observation
