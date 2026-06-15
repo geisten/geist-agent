@@ -51,8 +51,12 @@ struct spg_eval_case_result {
  * substring is matched against workspace->observation after the run. Returns
  * SPG_E_INVALID_ARG on bad arguments; otherwise SPG_OK with the verdict in
  * *result (a failed expectation is a result, not a return error). */
+/* gate_marker (nullable) gates the scripted fake: until it appears in the
+ * prompt the agent's replies are rejected — letting a deterministic eval show a
+ * recalled lesson flipping a case from failing to passing. */
 [[nodiscard]] enum spg_status
 spg_eval_run_case(const struct spg_fake_response *script, size_t script_n,
+                  const char *gate_marker,
                   const struct spg_agent_run_inputs *inputs,
                   const struct spg_agent_run_config *config,
                   const struct spg_agent_run_workspace *workspace,

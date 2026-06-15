@@ -53,6 +53,11 @@ struct spg_model_adapter_config {
      * outlive the adapter. */
     size_t                          fake_response_count;
     const struct spg_fake_response *fake_responses;
+
+    /* Evaluation aid: while this marker is absent from the prompt, the fake
+     * emits an invalid form (the loop rejects it); once present, the script
+     * runs. Null disables gating. */
+    const char *fake_gate_marker;
 };
 
 struct spg_model_adapter {
@@ -69,6 +74,7 @@ struct spg_model_adapter {
     size_t                          fake_response_count;
     const struct spg_fake_response *fake_responses;
     size_t                          fake_index; /* next scripted reply */
+    const char                     *fake_gate_marker;
 };
 
 struct spg_model_generate_request {

@@ -105,6 +105,12 @@ struct spg_orchestrator_workspace {
     char  *shell_stdout_buf;
     size_t shell_stderr_capacity;
     char  *shell_stderr_buf;
+
+    /* Optional: when a store is present, the tick re-renders the mind-palace
+     * index into this buffer and injects it into context, so saved memories and
+     * lessons are recalled. Null falls back to state->memory_index. */
+    size_t memory_index_capacity;
+    char  *memory_index_buf;
 };
 
 struct spg_orchestrator_result {

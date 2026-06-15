@@ -41,6 +41,7 @@ static enum spg_eval_outcome judge(const struct spg_eval_expect *expect,
 
 enum spg_status
 spg_eval_run_case(const struct spg_fake_response *script, const size_t script_n,
+                  const char *gate_marker,
                   const struct spg_agent_run_inputs *inputs,
                   const struct spg_agent_run_config *config,
                   const struct spg_agent_run_workspace *workspace,
@@ -59,6 +60,7 @@ spg_eval_run_case(const struct spg_fake_response *script, const size_t script_n,
         .sampling            = {.top_p = 1.0f},
         .fake_response_count = script_n,
         .fake_responses      = script,
+        .fake_gate_marker    = gate_marker,
     };
     if (spg_model_adapter_init(&model, &model_config) != SPG_OK) {
         return SPG_E_INVALID_ARG;

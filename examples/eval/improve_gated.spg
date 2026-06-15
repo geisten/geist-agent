@@ -1,0 +1,4 @@
+(eval_suite
+ (config "examples/run.spg")
+ (case (name "gated") (script "examples/eval/gated.txt") (gate_marker "lesson-rejected") (max_steps 5)
+       (expect (termination finished))))

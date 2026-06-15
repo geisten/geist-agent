@@ -78,6 +78,10 @@ struct spg_agent_run_workspace {
     char                   *shell_stderr;
     size_t                  trajectory_capacity;
     struct spg_journal_record_header *trajectory;
+    /* Optional: when inputs->store is set, the mind-palace index is rendered
+     * here each step and injected into context (so lessons/memories recall). */
+    size_t                  memory_index_capacity;
+    char                   *memory_index;
 };
 
 /* Runs the loop, filling *usage (zeroed first) and *result. Returns

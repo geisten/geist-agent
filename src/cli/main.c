@@ -1889,6 +1889,7 @@ static int agent_command(int argc, char **argv) {
     static char            observation[AGENT_OBS_BYTES];
     static char            shell_stdout[AGENT_SHELL_STDOUT];
     static char            shell_stderr[AGENT_SHELL_STDERR];
+    static char            mem_index[AGENT_OBS_BYTES];
     static struct spg_journal_record_header trajectory[256];
 
     const struct spg_agent_run_workspace ws = {
@@ -1918,6 +1919,8 @@ static int agent_command(int argc, char **argv) {
         .shell_stderr            = shell_stderr,
         .trajectory_capacity     = sizeof trajectory / sizeof trajectory[0],
         .trajectory              = trajectory,
+        .memory_index_capacity   = sizeof mem_index,
+        .memory_index            = mem_index,
     };
     const struct spg_agent_run_inputs inputs = {
         .model         = &model,
@@ -2143,6 +2146,7 @@ static enum spg_status eval_run_suite(const char *suite_path,
     static char            observation[AGENT_OBS_BYTES];
     static char            sh_out[AGENT_SHELL_STDOUT];
     static char            sh_err[AGENT_SHELL_STDERR];
+    static char            mem_index[AGENT_OBS_BYTES];
     static struct spg_journal_record_header traj[256];
     const struct spg_agent_run_workspace ws = {
         .context_capacity        = sizeof context,
@@ -2171,6 +2175,8 @@ static enum spg_status eval_run_suite(const char *suite_path,
         .shell_stderr            = sh_err,
         .trajectory_capacity     = 256u,
         .trajectory              = traj,
+        .memory_index_capacity   = sizeof mem_index,
+        .memory_index            = mem_index,
     };
     const struct spg_agent_run_inputs inputs = {
         .policy        = &policy,
@@ -2211,6 +2217,12 @@ static enum spg_status eval_run_suite(const char *suite_path,
                        &max_repairs);
         const bool allow_exec =
             eval_flag(nod, c, suite_text.n, suite_text.data, "allow_exec");
+        char        gate[64];
+        const char *gate_marker =
+            eval_str(nod, c, suite_text.n, suite_text.data, "gate_marker", gate,
+                     sizeof gate)
+                ? gate
+                : nullptr;
 
         struct spg_eval_expect expect = {};
         const uint32_t exp = eval_field(nod, c, suite_text.n, suite_text.data,
@@ -2258,7 +2270,7 @@ static enum spg_status eval_run_suite(const char *suite_path,
         };
         struct spg_eval_case_result *res = &report->results[report->total];
         const enum spg_status        cs  = spg_eval_run_case(
-            script, script_n, &inputs, &rcfg, &ws, &expect, res);
+            script, script_n, gate_marker, &inputs, &rcfg, &ws, &expect, res);
         free_file_buffer(&script_text);
         if (cs != SPG_OK) {
             rc = cs;

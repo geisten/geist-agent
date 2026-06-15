@@ -1,3 +1,8 @@
+#define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE 1
+#endif
+
 #include "sporegeist/eval.h"
 
 #include "sporegeist/policy_config.h"
@@ -5,7 +10,9 @@
 #include "sporegeist/sim_config.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static const char policy_text[] =
     "(policy (network_default deny)"
@@ -43,6 +50,7 @@ struct fixture {
     char                           observation[4096];
     char                           shell_stdout[4096];
     char                           shell_stderr[1024];
+    char                           mem_index[4096];
     struct spg_journal_record_header trajectory[256];
 };
 
@@ -96,6 +104,8 @@ static struct spg_agent_run_workspace ws_for(struct fixture *fx) {
         .shell_stderr            = fx->shell_stderr,
         .trajectory_capacity     = 256u,
         .trajectory              = fx->trajectory,
+        .memory_index_capacity   = sizeof fx->mem_index,
+        .memory_index            = fx->mem_index,
     };
 }
 
@@ -124,8 +134,8 @@ static int test_case_pass(void) {
                                            .min_steps   = 2u,
                                            .max_steps   = 2u};
     struct spg_eval_case_result res = {};
-    if (spg_eval_run_case(sim_finish, 2u, &inputs, &config, &ws, &expect,
-                          &res) != SPG_OK) {
+    if (spg_eval_run_case(sim_finish, 2u, nullptr, &inputs, &config, &ws,
+                          &expect, &res) != SPG_OK) {
         return 1;
     }
     return (res.outcome == SPG_EVAL_PASS &&
@@ -153,8 +163,8 @@ static int test_case_fail_termination(void) {
                                            .termination =
                                                SPG_AGENT_LOOP_FINISHED};
     struct spg_eval_case_result res = {};
-    if (spg_eval_run_case(sim_finish, 2u, &inputs, &config, &ws, &expect,
-                          &res) != SPG_OK) {
+    if (spg_eval_run_case(sim_finish, 2u, nullptr, &inputs, &config, &ws,
+                          &expect, &res) != SPG_OK) {
         return 1;
     }
     return (res.outcome == SPG_EVAL_FAIL_TERMINATION &&
@@ -163,7 +173,51 @@ static int test_case_fail_termination(void) {
                : 1;
 }
 
+/* A memory in the store is rendered into the agent's context via the index. */
+static int test_memory_index_injected(void) {
+    struct fixture fx;
+    if (load_fixture(&fx) != 0) {
+        return 1;
+    }
+    char dir[64];
+    memcpy(dir, "/tmp/spg_evalmem_XXXXXX", 24u);
+    struct spg_mem_store store;
+    if (mkdtemp(dir) == nullptr || spg_mem_store_open(&store, dir) != SPG_OK ||
+        spg_mem_save(&store, "factslug", "a saved fact", "the body") !=
+            SPG_OK) {
+        return 1;
+    }
+    const struct spg_agent_run_inputs inputs = {
+        .policy        = &fx.policy,
+        .policy_text_n = strlen(policy_text),
+        .policy_text   = policy_text,
+        .run           = &fx.run,
+        .sim           = &fx.sim,
+        .store         = &store,
+    };
+    const struct spg_agent_run_config    config = {.max_steps = 5u};
+    const struct spg_agent_run_workspace ws     = ws_for(&fx);
+    const struct spg_eval_expect         expect = {
+        .check_termination = true, .termination = SPG_AGENT_LOOP_FINISHED};
+    struct spg_eval_case_result res = {};
+    const enum spg_status       s   = spg_eval_run_case(
+        sim_finish, 2u, nullptr, &inputs, &config, &ws, &expect, &res);
+    /* The rendered context (last step) carries the mind-palace index entry. */
+    const int ok = (s == SPG_OK && res.outcome == SPG_EVAL_PASS &&
+                    strstr(fx.context, "factslug") != nullptr)
+                       ? 0
+                       : 1;
+    char cmd[128];
+    (void)snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);
+    (void)system(cmd);
+    return ok;
+}
+
 int main(void) {
+    if (test_memory_index_injected() != 0) {
+        fprintf(stderr, "test_memory_index_injected failed\n");
+        return 1;
+    }
     if (test_case_pass() != 0) {
         fprintf(stderr, "test_case_pass failed\n");
         return 1;

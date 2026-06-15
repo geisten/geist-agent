@@ -56,6 +56,8 @@ enum spg_status spg_agent_run(const struct spg_agent_run_inputs *inputs,
         .shell_stdout_buf              = workspace->shell_stdout,
         .shell_stderr_capacity         = workspace->shell_stderr_capacity,
         .shell_stderr_buf              = workspace->shell_stderr,
+        .memory_index_capacity         = workspace->memory_index_capacity,
+        .memory_index_buf              = workspace->memory_index,
     };
 
     struct spg_orchestrator_state state = {

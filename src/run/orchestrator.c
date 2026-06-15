@@ -172,6 +172,15 @@ enum spg_status spg_orchestrator_tick(
         .stage = SPG_ORCHESTRATOR_STAGE_NOT_STARTED,
     };
 
+    /* Refresh the mind-palace index from the store so memories/lessons saved in
+     * earlier steps (or by `improve`) are recalled into this step's context. */
+    const char *memory_index = state->memory_index;
+    if (state->store != nullptr && workspace->memory_index_buf != nullptr &&
+        workspace->memory_index_capacity > 0u) {
+        (void)spg_mem_index(state->store, workspace->memory_index_capacity,
+                            workspace->memory_index_buf, nullptr, nullptr);
+        memory_index = workspace->memory_index_buf;
+    }
     struct spg_actor_state actor_state = {
         .graph                = state->graph,
         .memory               = state->memory,
@@ -185,7 +194,7 @@ enum spg_status spg_orchestrator_tick(
         .graph_text           = state->graph_text,
         .memory_text_n        = state->memory_text_n,
         .memory_text          = state->memory_text,
-        .memory_index         = state->memory_index,
+        .memory_index         = memory_index,
         .observation        = state->observation,
     };
     const struct spg_actor_step_config actor_config = {

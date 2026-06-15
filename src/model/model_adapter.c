@@ -95,7 +95,17 @@ static enum spg_status append_bytes(struct spg_model_generate_result *result,
 static enum spg_status generate_fake(struct spg_model_adapter *adapter,
                                      const struct spg_model_generate_request *request,
                                      struct spg_model_generate_result *result) {
-    (void)request;
+    /* Prompt-gated fake (evaluation harness): until the gate marker appears in
+     * the prompt, emit an invalid form so the loop rejects it. The marker is a
+     * lesson the agent must have recalled — letting a deterministic eval show
+     * that learning a lesson flips a failing case to passing. */
+    if (adapter->fake_gate_marker != nullptr &&
+        adapter->fake_gate_marker[0] != '\0' &&
+        (request->prompt == nullptr ||
+         strstr(request->prompt, adapter->fake_gate_marker) == nullptr)) {
+        result->tokens_decoded = 1u;
+        return append_bytes(result, 9u, "(blocked)");
+    }
     const char *resp = adapter->fake_response;
     size_t      n    = adapter->fake_response_n;
     if (adapter->fake_responses != nullptr) {
@@ -182,6 +192,7 @@ spg_model_adapter_init(struct spg_model_adapter *adapter,
         adapter->fake_response_count = config->fake_response_count;
         adapter->fake_responses      = config->fake_responses;
         adapter->fake_index          = 0u;
+        adapter->fake_gate_marker    = config->fake_gate_marker;
         adapter->initialized         = true;
         return SPG_OK;
     }

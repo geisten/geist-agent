@@ -24,6 +24,14 @@ printf '%s\n' "$OUT2" | grep -q '"baseline_passed":3,"final_passed":3,"lessons_k
 # no lesson files were created
 test -z "$(ls "$T/m2" 2>/dev/null | grep -v MEMORY.md || true)"
 
+# --- measurable gain: a recalled lesson flips a gated case from fail to pass.
+#     Baseline rejects (marker absent); after the lesson is saved, its index
+#     entry appears in context, the gate opens, and the case finishes. ---
+OUT3=$("$SPG_BIN" improve examples/eval/improve_gated.spg --memory-dir "$T/m3")
+printf '%s\n' "$OUT3"
+printf '%s\n' "$OUT3" | grep -q '"lesson":"lesson-rejected","accepted":true,"baseline_passed":0,"trial_passed":1'
+printf '%s\n' "$OUT3" | grep -q '"baseline_passed":0,"final_passed":1,"lessons_kept":1'
+
 # --- deterministic: two fresh runs of the failing suite agree byte-for-byte ---
 "$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/a" > "$T/a.out"
 "$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/b" > "$T/b.out"
