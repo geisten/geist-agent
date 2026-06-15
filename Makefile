@@ -79,6 +79,7 @@ SPG_SOURCES := \
     src/exec/exec_command.c \
     src/exec/host_probe.c \
     src/exec/shell_executor.c \
+    src/improve/improve.c \
     src/executor/executor_boundary.c \
     src/graph/graph.c \
     src/journal/journal.c \
