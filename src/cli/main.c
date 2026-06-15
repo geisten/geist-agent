@@ -1,6 +1,7 @@
 #include "sporegeist/sporegeist.h"
 
 #include "sporegeist/agent_loop.h"
+#include "sporegeist/agent_run.h"
 #include "sporegeist/eval.h"
 #include "sporegeist/exec_command.h"
 #include "sporegeist/mem_command.h"
@@ -1874,14 +1875,9 @@ static int agent_command(int argc, char **argv) {
         store_open = true;
     }
 
-    struct spg_graph  graph  = {};
-    struct spg_memory memory = {};
-    spg_graph_init(&graph);
-    spg_memory_init(&memory);
-
-    struct spg_context_graph_ref   graph_refs[CLI_CONTEXT_REFS];
-    struct spg_context_memory_ref  memory_refs[CLI_CONTEXT_REFS];
-    struct spg_context_journal_ref journal_refs[CLI_CONTEXT_REFS];
+    static struct spg_context_graph_ref   graph_refs[CLI_CONTEXT_REFS];
+    static struct spg_context_memory_ref  memory_refs[CLI_CONTEXT_REFS];
+    static struct spg_context_journal_ref journal_refs[CLI_CONTEXT_REFS];
     static char            context[CLI_CONTEXT_BYTES];
     static char            model_output[CLI_MODEL_OUTPUT_BYTES];
     static struct spg_sexpr_token rec_tokens[CLI_TOKEN_CAPACITY];
@@ -1892,76 +1888,57 @@ static int agent_command(int argc, char **argv) {
     static char            shell_stdout[AGENT_SHELL_STDOUT];
     static char            shell_stderr[AGENT_SHELL_STDERR];
     static struct spg_journal_record_header trajectory[256];
-    observation[0] = '\0';
 
-    const struct spg_orchestrator_workspace workspace = {
-        .actor = {.context_capacity      = sizeof context,
-                  .context               = context,
-                  .model_output_capacity = sizeof model_output,
-                  .model_output          = model_output,
-                  .graph_ref_capacity    = CLI_CONTEXT_REFS,
-                  .graph_refs            = graph_refs,
-                  .memory_ref_capacity   = CLI_CONTEXT_REFS,
-                  .memory_refs           = memory_refs,
-                  .journal_ref_capacity  = CLI_CONTEXT_REFS,
-                  .journal_refs          = journal_refs},
-        .recommendation_token_capacity = CLI_TOKEN_CAPACITY,
-        .recommendation_tokens         = rec_tokens,
-        .recommendation_node_capacity  = CLI_NODE_CAPACITY,
-        .recommendation_nodes          = rec_nodes,
-        .policy_payload_capacity       = sizeof policy_payload,
-        .policy_payload                = policy_payload,
-        .sim_payload_capacity          = sizeof sim_payload,
-        .sim_payload                   = sim_payload,
-        .observation_capacity        = sizeof observation,
-        .observation_buf             = observation,
-        .shell_stdout_capacity         = sizeof shell_stdout,
-        .shell_stdout_buf              = shell_stdout,
-        .shell_stderr_capacity         = sizeof shell_stderr,
-        .shell_stderr_buf              = shell_stderr,
+    const struct spg_agent_run_workspace ws = {
+        .context_capacity        = sizeof context,
+        .context                 = context,
+        .model_output_capacity   = sizeof model_output,
+        .model_output            = model_output,
+        .graph_ref_capacity      = CLI_CONTEXT_REFS,
+        .graph_refs              = graph_refs,
+        .memory_ref_capacity     = CLI_CONTEXT_REFS,
+        .memory_refs             = memory_refs,
+        .journal_ref_capacity    = CLI_CONTEXT_REFS,
+        .journal_refs            = journal_refs,
+        .token_capacity          = CLI_TOKEN_CAPACITY,
+        .tokens                  = rec_tokens,
+        .node_capacity           = CLI_NODE_CAPACITY,
+        .nodes                   = rec_nodes,
+        .policy_payload_capacity = sizeof policy_payload,
+        .policy_payload          = policy_payload,
+        .sim_payload_capacity    = sizeof sim_payload,
+        .sim_payload             = sim_payload,
+        .observation_capacity    = sizeof observation,
+        .observation             = observation,
+        .shell_stdout_capacity   = sizeof shell_stdout,
+        .shell_stdout            = shell_stdout,
+        .shell_stderr_capacity   = sizeof shell_stderr,
+        .shell_stderr            = shell_stderr,
+        .trajectory_capacity     = sizeof trajectory / sizeof trajectory[0],
+        .trajectory              = trajectory,
     };
-
-    struct spg_policy_usage       usage = {};
-    struct spg_orchestrator_state state = {
-        .graph         = &graph,
-        .memory        = &memory,
-        .journal       = &journal,
+    const struct spg_agent_run_inputs inputs = {
         .model         = &model,
-        .sim           = &sim,
-        .store         = store_open ? &store : nullptr,
-        .run           = &run,
-        .usage         = &usage,
         .policy        = &policy,
         .policy_text_n = policy_text.n,
         .policy_text   = policy_text.data,
-        .observation = observation,
+        .run           = &run,
+        .sim           = &sim,
+        .store         = store_open ? &store : nullptr,
+        .journal       = &journal,
     };
-    const struct spg_agent_loop_config loop_config = {
-        .base = {.actor_id            = 1u,
-                 .context_limits      = {.graph_nodes    = CLI_CONTEXT_REFS,
-                                         .memory_facts   = CLI_CONTEXT_REFS,
-                                         .journal_events = CLI_CONTEXT_REFS},
-                 .max_decode_tokens   = 256u,
-                 .reset_model_session = true,
-                 .write_journal       = true,
-                 .update_graph        = true,
-                 .update_memory       = true,
-                 .execution_enabled   = allow_exec,
-                 .exec_working_dir    = ".",
-                 .exec_workdir_prefix = ".",
-                 .exec_timeout_ms     = 5000u,
-                 .exec_stdout_cap     = sizeof shell_stdout,
-                 .exec_stderr_cap     = sizeof shell_stderr},
-        .max_steps               = max_steps,
-        .max_repairs             = max_repairs,
-        .token_budget            = run.budgets.tokens,
-        .step_budget             = run.budgets.inference_steps,
-        .journal_header_capacity = sizeof trajectory / sizeof trajectory[0],
-        .journal_headers         = trajectory,
+    const struct spg_agent_run_config rcfg = {
+        .max_steps         = max_steps,
+        .max_repairs       = max_repairs,
+        .execution_enabled = allow_exec,
+        .exec_timeout_ms   = 5000u,
+        .exec_stdout_cap   = sizeof shell_stdout,
+        .exec_stderr_cap   = sizeof shell_stderr,
+        .context_refs      = CLI_CONTEXT_REFS,
     };
+    struct spg_policy_usage      usage       = {};
     struct spg_agent_loop_result loop_result = {};
-    status =
-        spg_agent_loop_run(&state, &loop_config, &workspace, &usage, &loop_result);
+    status = spg_agent_run(&inputs, &rcfg, &ws, &usage, &loop_result);
     printf("steps=%zu termination=%s journal=%s\n", loop_result.steps_taken,
            spg_agent_loop_termination_to_string(loop_result.termination),
            journal_path);
