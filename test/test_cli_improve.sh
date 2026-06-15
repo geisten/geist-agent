@@ -1,0 +1,32 @@
+#!/bin/sh
+# System test: the self-improvement loop. A failing eval case is distilled into
+# a mind-palace lesson, persisted, re-evaluated, and kept only if it does not
+# regress the suite (the eval harness gates the agent's self-modification).
+set -eu
+
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+
+# --- a failing case -> a lesson is learned and persisted ---
+OUT=$("$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/m1")
+printf '%s\n' "$OUT"
+printf '%s\n' "$OUT" | grep -q '"lesson":"lesson-rejected","accepted":true'
+printf '%s\n' "$OUT" | grep -q '"lessons_kept":1'
+# the lesson now lives in the mind-palace (file + index)
+test -f "$T/m1/lesson-rejected.md"
+grep -q "lesson-rejected" "$T/m1/MEMORY.md"
+grep -q "valid (recommend" "$T/m1/lesson-rejected.md"
+
+# --- an all-passing suite learns nothing ---
+OUT2=$("$SPG_BIN" improve examples/eval/suite.spg --memory-dir "$T/m2")
+printf '%s\n' "$OUT2" | grep -q '"baseline_passed":3,"final_passed":3,"lessons_kept":0'
+# no lesson files were created
+test -z "$(ls "$T/m2" 2>/dev/null | grep -v MEMORY.md || true)"
+
+# --- deterministic: two fresh runs of the failing suite agree byte-for-byte ---
+"$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/a" > "$T/a.out"
+"$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/b" > "$T/b.out"
+cmp "$T/a.out" "$T/b.out"
+
+echo "test_cli_improve: PASS"

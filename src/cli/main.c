@@ -4,6 +4,7 @@
 #include "sporegeist/agent_run.h"
 #include "sporegeist/eval.h"
 #include "sporegeist/exec_command.h"
+#include "sporegeist/improve.h"
 #include "sporegeist/mem_command.h"
 #include "sporegeist/mem_store.h"
 
@@ -52,6 +53,7 @@ static void print_usage(const char *argv0) {
             "  agent            run a governed multi-step agent loop "
             "(scripted)\n"
             "  eval             score a scripted agent suite (JSONL report)\n"
+            "  improve          learn lessons from eval failures into memory\n"
             "  replay           print a journal timeline as JSONL\n"
             "  verify-journal   verify and summarize a journal\n"
             "  policy-check     validate and summarize a policy file\n"
@@ -2059,33 +2061,33 @@ static bool eval_termination(const struct spg_sexpr_node *nodes,
 
 #define EVAL_SCRIPT_MAX 64u
 
-static int eval_command(int argc, char **argv) {
-    const char *suite_path = nullptr;
-    for (int i = 2; i < argc; i += 1) {
-        if (suite_path == nullptr && argv[i][0] != '-') {
-            suite_path = argv[i];
-            continue;
-        }
-        fprintf(stderr, "eval: unexpected argument: %s\n", argv[i]);
-        return 2;
-    }
-    if (suite_path == nullptr) {
-        fprintf(stderr, "usage: %s eval <suite.spg>\n", argv[0]);
-        return 2;
-    }
+#define EVAL_MAX_CASES 64u
 
-    int                rc            = 1;
+struct eval_run_report {
+    size_t                      total;
+    size_t                      passed;
+    char                        names[EVAL_MAX_CASES][64];
+    struct spg_eval_case_result results[EVAL_MAX_CASES];
+};
+
+/* Load a suite + its shared run/policy/scenario config and run every case with
+ * the given mind-palace store (nullable) threaded into each run; fill *report.
+ * Returns SPG_OK on a complete run. Prints nothing (the caller reports). */
+static enum spg_status eval_run_suite(const char *suite_path,
+                                      struct spg_mem_store *store,
+                                      struct eval_run_report *report) {
+    *report = (struct eval_run_report){};
     struct file_buffer suite_text    = {};
     struct file_buffer run_text      = {};
     struct file_buffer policy_text   = {};
     struct file_buffer scenario_text = {};
     char              *policy_path   = nullptr;
     char              *scenario_path = nullptr;
+    enum spg_status    rc            = SPG_E_IO;
 
     enum spg_status status = read_file(suite_path, &suite_text);
     if (status != SPG_OK) {
-        fprintf(stderr, "eval: read suite failed: %s\n",
-                spg_status_to_string(status));
+        rc = status;
         goto done;
     }
     static struct spg_sexpr_token tok[CLI_TOKEN_CAPACITY];
@@ -2097,13 +2099,13 @@ static int eval_command(int argc, char **argv) {
                              tok, CLI_NODE_CAPACITY, nod, &tn, &nn, &se) !=
             SPG_OK ||
         nn == 0u || nod[0].kind != SPG_SEXPR_NODE_LIST) {
-        fprintf(stderr, "eval: suite parse failed\n");
+        rc = SPG_E_FORMAT;
         goto done;
     }
     char config_path[CLI_PATH_MAX];
     if (!eval_str(nod, 0u, suite_text.n, suite_text.data, "config", config_path,
                   sizeof config_path)) {
-        fprintf(stderr, "eval: suite missing (config \"...\")\n");
+        rc = SPG_E_FORMAT;
         goto done;
     }
 
@@ -2118,15 +2120,14 @@ static int eval_command(int argc, char **argv) {
                               &scenario_path);
     }
     if (status != SPG_OK) {
-        fprintf(stderr, "eval: load config failed: %s\n",
-                spg_status_to_string(status));
+        rc = status;
         goto done;
     }
     struct spg_policy_config policy = {};
     struct spg_sim_config    sim    = {};
     if (load_policy_file(policy_path, &policy_text, &policy) != SPG_OK ||
         load_scenario_file(scenario_path, &scenario_text, &sim) != SPG_OK) {
-        fprintf(stderr, "eval: load policy/scenario failed\n");
+        rc = SPG_E_FORMAT;
         goto done;
     }
 
@@ -2177,12 +2178,13 @@ static int eval_command(int argc, char **argv) {
         .policy_text   = policy_text.data,
         .run           = &run,
         .sim           = &sim,
+        .store         = store,
     };
 
-    size_t total  = 0u;
-    size_t passed = 0u;
+    rc = SPG_OK;
     for (uint32_t c = spg_sexpr_first_child(nod, 0u);
-         c != SPG_SEXPR_INVALID_INDEX; c = nod[c].next_sibling) {
+         c != SPG_SEXPR_INVALID_INDEX && report->total < EVAL_MAX_CASES;
+         c = nod[c].next_sibling) {
         const uint32_t head = spg_sexpr_first_child(nod, c);
         if (nod[c].kind != SPG_SEXPR_NODE_LIST ||
             head == SPG_SEXPR_INVALID_INDEX ||
@@ -2190,14 +2192,15 @@ static int eval_command(int argc, char **argv) {
                                     nod[head].span, "case")) {
             continue;
         }
-        char name[64]        = "case";
+        char *name = report->names[report->total];
+        (void)snprintf(name, sizeof report->names[0], "case");
         char script_path[CLI_PATH_MAX];
         char obs[256];
         (void)eval_str(nod, c, suite_text.n, suite_text.data, "name", name,
-                       sizeof name);
+                       sizeof report->names[0]);
         if (!eval_str(nod, c, suite_text.n, suite_text.data, "script",
                       script_path, sizeof script_path)) {
-            fprintf(stderr, "eval: case '%s' missing (script \"...\")\n", name);
+            rc = SPG_E_FORMAT;
             goto done;
         }
         uint64_t max_steps   = 8u;
@@ -2237,7 +2240,7 @@ static int eval_command(int argc, char **argv) {
 
         struct file_buffer script_text = {};
         if (read_file(script_path, &script_text) != SPG_OK) {
-            fprintf(stderr, "eval: case '%s' read script failed\n", name);
+            rc = SPG_E_IO;
             goto done;
         }
         static struct spg_fake_response script[EVAL_SCRIPT_MAX];
@@ -2253,28 +2256,19 @@ static int eval_command(int argc, char **argv) {
             .exec_stderr_cap   = sizeof sh_err,
             .context_refs      = CLI_CONTEXT_REFS,
         };
-        struct spg_eval_case_result res = {};
+        struct spg_eval_case_result *res = &report->results[report->total];
         const enum spg_status        cs  = spg_eval_run_case(
-            script, script_n, &inputs, &rcfg, &ws, &expect, &res);
+            script, script_n, &inputs, &rcfg, &ws, &expect, res);
         free_file_buffer(&script_text);
         if (cs != SPG_OK) {
-            fprintf(stderr, "eval: case '%s' run failed: %s\n", name,
-                    spg_status_to_string(cs));
+            rc = cs;
             goto done;
         }
-        total += 1u;
-        if (res.outcome == SPG_EVAL_PASS) {
-            passed += 1u;
+        if (res->outcome == SPG_EVAL_PASS) {
+            report->passed += 1u;
         }
-        printf("{\"name\":\"%s\",\"outcome\":\"%s\",\"termination\":\"%s\","
-               "\"steps\":%zu,\"repairs\":%zu}\n",
-               name, spg_eval_outcome_to_string(res.outcome),
-               spg_agent_loop_termination_to_string(res.termination),
-               res.steps_taken, res.repairs_used);
+        report->total += 1u;
     }
-    printf("{\"suite\":\"%s\",\"total\":%zu,\"passed\":%zu}\n", suite_path,
-           total, passed);
-    rc = (total > 0u && passed == total) ? 0 : 1;
 
 done:
     free(policy_path);
@@ -2284,6 +2278,134 @@ done:
     free_file_buffer(&policy_text);
     free_file_buffer(&scenario_text);
     return rc;
+}
+
+static void eval_print_report(const char *suite_path,
+                              const struct eval_run_report *report) {
+    for (size_t i = 0u; i < report->total; i += 1u) {
+        const struct spg_eval_case_result *r = &report->results[i];
+        printf("{\"name\":\"%s\",\"outcome\":\"%s\",\"termination\":\"%s\","
+               "\"steps\":%zu,\"repairs\":%zu}\n",
+               report->names[i], spg_eval_outcome_to_string(r->outcome),
+               spg_agent_loop_termination_to_string(r->termination),
+               r->steps_taken, r->repairs_used);
+    }
+    printf("{\"suite\":\"%s\",\"total\":%zu,\"passed\":%zu}\n", suite_path,
+           report->total, report->passed);
+}
+
+static int eval_command(int argc, char **argv) {
+    const char *suite_path = nullptr;
+    for (int i = 2; i < argc; i += 1) {
+        if (suite_path == nullptr && argv[i][0] != '-') {
+            suite_path = argv[i];
+            continue;
+        }
+        fprintf(stderr, "eval: unexpected argument: %s\n", argv[i]);
+        return 2;
+    }
+    if (suite_path == nullptr) {
+        fprintf(stderr, "usage: %s eval <suite.spg>\n", argv[0]);
+        return 2;
+    }
+    static struct eval_run_report report;
+    const enum spg_status status = eval_run_suite(suite_path, nullptr, &report);
+    if (status != SPG_OK) {
+        fprintf(stderr, "eval: suite run failed: %s\n",
+                spg_status_to_string(status));
+        return 1;
+    }
+    eval_print_report(suite_path, &report);
+    return (report.total > 0u && report.passed == report.total) ? 0 : 1;
+}
+
+/* Self-improvement: run the suite, distill a lesson for each failing case,
+ * persist each tentatively into the mind-palace, re-run, and keep it only if
+ * the pass count did not drop (else revert). Emits a JSONL report. */
+static int improve_command(int argc, char **argv) {
+    const char *suite_path = nullptr;
+    const char *memory_dir = nullptr;
+    for (int i = 2; i < argc; i += 1) {
+        if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
+            memory_dir = argv[i + 1];
+            i += 1;
+            continue;
+        }
+        if (suite_path == nullptr && argv[i][0] != '-') {
+            suite_path = argv[i];
+            continue;
+        }
+        fprintf(stderr, "improve: unexpected argument: %s\n", argv[i]);
+        return 2;
+    }
+    if (suite_path == nullptr) {
+        fprintf(stderr, "usage: %s improve <suite.spg> [--memory-dir <d>]\n",
+                argv[0]);
+        return 2;
+    }
+
+    struct spg_mem_store store;
+    if (spg_mem_store_open(&store, spg_mem_resolve_dir(memory_dir)) != SPG_OK) {
+        fprintf(stderr, "improve: cannot open memory dir %s\n",
+                spg_mem_resolve_dir(memory_dir));
+        return 1;
+    }
+
+    static struct eval_run_report baseline;
+    if (eval_run_suite(suite_path, &store, &baseline) != SPG_OK) {
+        fprintf(stderr, "improve: baseline run failed\n");
+        return 1;
+    }
+
+    /* Distinct candidate lessons from the failing cases. */
+    struct spg_lesson candidates[EVAL_MAX_CASES];
+    size_t            ncand = 0u;
+    for (size_t i = 0u; i < baseline.total; i += 1u) {
+        struct spg_lesson lesson;
+        if (!spg_reflect_case(&baseline.results[i], &lesson)) {
+            continue;
+        }
+        bool seen = false;
+        for (size_t j = 0u; j < ncand; j += 1u) {
+            if (strcmp(candidates[j].slug, lesson.slug) == 0) {
+                seen = true;
+                break;
+            }
+        }
+        if (!seen && ncand < EVAL_MAX_CASES) {
+            candidates[ncand] = lesson;
+            ncand += 1u;
+        }
+    }
+
+    const size_t orig_passed = baseline.passed;
+    size_t       cur_passed  = baseline.passed;
+    size_t       kept        = 0u;
+    for (size_t k = 0u; k < ncand; k += 1u) {
+        const struct spg_lesson *lesson = &candidates[k];
+        (void)spg_mem_save(&store, lesson->slug, lesson->description,
+                           lesson->body); /* tentative */
+        static struct eval_run_report trial;
+        if (eval_run_suite(suite_path, &store, &trial) != SPG_OK) {
+            fprintf(stderr, "improve: trial run failed\n");
+            return 1;
+        }
+        const bool accepted = spg_improve_accept(cur_passed, trial.passed);
+        bool       was_kept = false;
+        (void)spg_improve_commit(&store, lesson, accepted, &was_kept);
+        printf("{\"lesson\":\"%s\",\"accepted\":%s,\"baseline_passed\":%zu,"
+               "\"trial_passed\":%zu}\n",
+               lesson->slug, accepted ? "true" : "false", cur_passed,
+               trial.passed);
+        if (was_kept) {
+            cur_passed = trial.passed;
+            kept += 1u;
+        }
+    }
+    printf("{\"suite\":\"%s\",\"baseline_passed\":%zu,\"final_passed\":%zu,"
+           "\"lessons_kept\":%zu}\n",
+           suite_path, orig_passed, cur_passed, kept);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -2332,6 +2454,10 @@ int main(int argc, char **argv) {
 
     if (strcmp(argv[1], "eval") == 0) {
         return eval_command(argc, argv);
+    }
+
+    if (strcmp(argv[1], "improve") == 0) {
+        return improve_command(argc, argv);
     }
 
     if (strcmp(argv[1], "verify-journal") == 0) {

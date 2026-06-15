@@ -1,7 +1,14 @@
+#define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__)
+#    define _DARWIN_C_SOURCE 1
+#endif
+
 #include "sporegeist/improve.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* A lesson is produced for each failing termination mode, with a valid slug. */
 static int test_reflect_failure_modes(void) {
@@ -76,6 +83,48 @@ static int test_reflect_null_args(void) {
                : 0;
 }
 
+/* commit keeps an accepted lesson and deletes (reverts) a rejected one. */
+static int test_commit_keep_and_revert(void) {
+    struct spg_mem_store store;
+    char                 dir[64];
+    memcpy(dir, "/tmp/spg_improve_XXXXXX", 23u);
+    if (mkdtemp(dir) == nullptr ||
+        spg_mem_store_open(&store, dir) != SPG_OK) {
+        return 1;
+    }
+    const struct spg_lesson lesson = {
+        .slug = "lesson-rejected", .description = "d", .body = "b"};
+
+    /* accepted -> the (already saved) lesson stays */
+    if (spg_mem_save(&store, lesson.slug, lesson.description, lesson.body) !=
+        SPG_OK) {
+        return 1;
+    }
+    bool kept = false;
+    char body[64];
+    if (spg_improve_commit(&store, &lesson, true, &kept) != SPG_OK || !kept ||
+        spg_mem_read(&store, lesson.slug, sizeof body, body, nullptr) !=
+            SPG_OK) {
+        return 1;
+    }
+
+    /* rejected -> the lesson is reverted (deleted) */
+    if (spg_improve_commit(&store, &lesson, false, &kept) != SPG_OK || kept ||
+        spg_mem_read(&store, lesson.slug, sizeof body, body, nullptr) !=
+            SPG_E_NOT_FOUND) {
+        return 1;
+    }
+    /* reverting an absent lesson is not an error */
+    if (spg_improve_commit(&store, &lesson, false, &kept) != SPG_OK) {
+        return 1;
+    }
+
+    char cmd[128];
+    (void)snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);
+    (void)system(cmd);
+    return 0;
+}
+
 int main(void) {
     if (test_reflect_failure_modes() != 0) {
         fprintf(stderr, "test_reflect_failure_modes failed\n");
@@ -95,6 +144,10 @@ int main(void) {
     }
     if (test_reflect_null_args() != 0) {
         fprintf(stderr, "test_reflect_null_args failed\n");
+        return 1;
+    }
+    if (test_commit_keep_and_revert() != 0) {
+        fprintf(stderr, "test_commit_keep_and_revert failed\n");
         return 1;
     }
     return 0;

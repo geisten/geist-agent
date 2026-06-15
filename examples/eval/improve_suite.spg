@@ -1,0 +1,4 @@
+(eval_suite
+ (config "examples/run.spg")
+ (case (name "broken") (script "examples/eval/broken.txt") (max_steps 5)
+       (expect (termination finished))))

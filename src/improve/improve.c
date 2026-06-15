@@ -10,6 +10,22 @@ static void set_lesson(struct spg_lesson *out, const char *slug,
     (void)snprintf(out->body, sizeof out->body, "%s", body);
 }
 
+enum spg_status spg_improve_commit(struct spg_mem_store *store,
+                                   const struct spg_lesson *lesson,
+                                   const bool accepted, bool *kept) {
+    if (store == nullptr || lesson == nullptr || kept == nullptr) {
+        return SPG_E_INVALID_ARG;
+    }
+    if (accepted) {
+        *kept = true;
+        return SPG_OK;
+    }
+    *kept                 = false;
+    const enum spg_status s = spg_mem_delete(store, lesson->slug);
+    /* A revert of a never-saved lesson is fine. */
+    return (s == SPG_OK || s == SPG_E_NOT_FOUND) ? SPG_OK : SPG_E_IO;
+}
+
 bool spg_reflect_case(const struct spg_eval_case_result *result,
                       struct spg_lesson *out) {
     if (result == nullptr || out == nullptr ||

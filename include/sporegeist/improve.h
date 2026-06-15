@@ -44,6 +44,14 @@ struct spg_lesson {
     return candidate_passed >= baseline_passed;
 }
 
+/* Commit the gate's decision for a lesson that was already tentatively saved
+ * into the store before re-evaluation: keep it when accepted, otherwise delete
+ * it (revert). Sets *kept. Returns SPG_E_INVALID_ARG on null args, SPG_E_IO if
+ * the revert delete fails, otherwise SPG_OK. */
+[[nodiscard]] enum spg_status
+spg_improve_commit(struct spg_mem_store *store,
+                   const struct spg_lesson *lesson, bool accepted, bool *kept);
+
 #ifdef __cplusplus
 }
 #endif
