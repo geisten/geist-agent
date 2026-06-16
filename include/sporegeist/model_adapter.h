@@ -18,6 +18,10 @@ struct geist_session;
 enum spg_model_adapter_kind {
     SPG_MODEL_ADAPTER_FAKE = 0,
     SPG_MODEL_ADAPTER_GEIST,
+    /* Drive a strong external model over an OpenAI-compatible HTTP endpoint.
+     * Only functional when built with SPG_ENABLE_REMOTE (libcurl); otherwise
+     * init/generate return SPG_E_UNSUPPORTED. */
+    SPG_MODEL_ADAPTER_REMOTE,
 };
 
 struct spg_model_sampling {
@@ -40,6 +44,13 @@ struct spg_model_adapter_config {
     const char *backend_name;
     const char *model_path;
     const char *awq_scales_path;
+
+    /* REMOTE: OpenAI-compatible endpoint URL, model name, and bearer key. All
+     * borrowed — they must outlive the adapter. api_key may be null for
+     * key-less local gateways. */
+    const char *endpoint_url;
+    const char *model_name;
+    const char *api_key;
 
     struct spg_model_sampling sampling;
 
@@ -75,6 +86,12 @@ struct spg_model_adapter {
     const struct spg_fake_response *fake_responses;
     size_t                          fake_index; /* next scripted reply */
     const char                     *fake_gate_marker;
+
+    /* REMOTE transport state: opaque CURL handle + borrowed config strings. */
+    void       *http;
+    const char *endpoint_url;
+    const char *model_name;
+    const char *api_key;
 };
 
 struct spg_model_generate_request {

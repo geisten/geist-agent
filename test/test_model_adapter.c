@@ -152,7 +152,34 @@ static int test_invalid_generate_args(void) {
     return 0;
 }
 
+/* In the default build (no libcurl), the REMOTE kind is selectable but
+ * unimplemented: init must report SPG_E_UNSUPPORTED and leave the adapter
+ * uninitialized. Under SPG_ENABLE_REMOTE the transport is present, so this
+ * default-build contract no longer applies and the check is skipped. */
+static int test_remote_unsupported(void) {
+#ifndef SPG_ENABLE_REMOTE
+    struct spg_model_adapter        adapter = {};
+    const struct spg_model_adapter_config config = {
+        .kind         = SPG_MODEL_ADAPTER_REMOTE,
+        .sampling     = {.top_p = 1.0f},
+        .endpoint_url = "http://127.0.0.1:1/v1/chat/completions",
+        .model_name   = "test-model",
+    };
+    if (spg_model_adapter_init(&adapter, &config) != SPG_E_UNSUPPORTED) {
+        return 1;
+    }
+    if (adapter.initialized) {
+        return 1;
+    }
+#endif
+    return 0;
+}
+
 int main(void) {
+    if (test_remote_unsupported() != 0) {
+        fprintf(stderr, "test_remote_unsupported failed\n");
+        return 1;
+    }
     if (test_fake_generate() != 0) {
         fprintf(stderr, "test_fake_generate failed\n");
         return 1;

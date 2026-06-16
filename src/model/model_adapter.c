@@ -5,6 +5,10 @@
 #include <math.h>
 #include <string.h>
 
+#ifdef SPG_ENABLE_REMOTE
+#include "sporegeist/model_remote.h"
+#endif
+
 static enum spg_status map_geist_status(const enum geist_status status) {
     switch (status) {
     case GEIST_OK:
@@ -35,7 +39,8 @@ static enum spg_status map_geist_status(const enum geist_status status) {
 }
 
 static bool adapter_kind_valid(const enum spg_model_adapter_kind kind) {
-    return kind == SPG_MODEL_ADAPTER_FAKE || kind == SPG_MODEL_ADAPTER_GEIST;
+    return kind == SPG_MODEL_ADAPTER_FAKE || kind == SPG_MODEL_ADAPTER_GEIST ||
+           kind == SPG_MODEL_ADAPTER_REMOTE;
 }
 
 static bool sampling_valid(const struct spg_model_sampling *sampling) {
@@ -197,6 +202,14 @@ spg_model_adapter_init(struct spg_model_adapter *adapter,
         return SPG_OK;
     }
 
+    if (config->kind == SPG_MODEL_ADAPTER_REMOTE) {
+#ifdef SPG_ENABLE_REMOTE
+        return spg_remote_init(adapter, config);
+#else
+        return SPG_E_UNSUPPORTED;
+#endif
+    }
+
     if (config->model_path == nullptr || config->model_path[0] == '\0') {
         return SPG_E_INVALID_ARG;
     }
@@ -242,6 +255,11 @@ void spg_model_adapter_destroy(struct spg_model_adapter *adapter) {
     if (adapter == nullptr) {
         return;
     }
+#ifdef SPG_ENABLE_REMOTE
+    if (adapter->kind == SPG_MODEL_ADAPTER_REMOTE) {
+        spg_remote_destroy(adapter);
+    }
+#endif
     if (adapter->session != nullptr) {
         geist_session_destroy(adapter->session);
     }
@@ -276,6 +294,12 @@ spg_model_generate(struct spg_model_adapter *adapter,
             return SPG_E_INVALID_STATE;
         }
         return generate_geist(adapter, request, result);
+    case SPG_MODEL_ADAPTER_REMOTE:
+#ifdef SPG_ENABLE_REMOTE
+        return spg_remote_generate(adapter, request, result);
+#else
+        return SPG_E_UNSUPPORTED;
+#endif
     }
     return SPG_E_INVALID_STATE;
 }
