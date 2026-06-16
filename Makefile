@@ -68,6 +68,7 @@ SPG_SOURCES := \
     src/core/allocator.c \
     src/core/budget_config.c \
     src/core/hash.c \
+    src/core/hmac.c \
     src/core/run_config.c \
     src/core/status.c \
     src/context/context.c \
@@ -83,6 +84,7 @@ SPG_SOURCES := \
     src/executor/executor_boundary.c \
     src/graph/graph.c \
     src/journal/journal.c \
+    src/journal/journal_sign.c \
     src/memory/mem_command.c \
     src/memory/mem_executor.c \
     src/memory/mem_store.c \

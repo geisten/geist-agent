@@ -14,7 +14,7 @@ governance, execution, audit, memory, evaluation, and learning.
 ```
 make            # build (host-debug: ASan/UBSan, strict warnings)
 make test       # framework-free C tests + CLI system tests
-./build/host-debug/bin/sporegeist            # CLI: agent / eval / improve / run / exec / memory / replay / ...
+./build/host-debug/bin/sporegeist            # CLI: agent / eval / improve / run / exec / memory / replay / seal-journal / ...
 ./build/host-debug/bin/sporegeist-chat       # governed chat REPL
 ```
 
@@ -129,13 +129,13 @@ This section is deliberately critical. sporegeist makes a sharp bet: be a
 
 ### Where we genuinely differentiate
 
-| Axis | sporegeist | Typical agent frameworks (LangChain/LangGraph, AutoGPT, CrewAI) |
-|---|---|---|
-| **Governance** | A **mandatory** policy gate (capability + budget) on *every* action — constitutive, not optional middleware. | Guardrails are opt‑in middleware bolted around the loop. |
-| **Determinism & audit** | Hash‑chained journal with logical timestamps → **byte‑identical replay**. | Non‑deterministic by default; tracing is best‑effort. |
-| **Self‑improvement safety** | Learned changes are gated by the eval harness — **kept only if no regression**, else reverted. | "Self‑improving" demos rarely have an automatic regression gate; memory edits are unguarded. |
-| **Sandboxed execution** | `local_shell` runs through fork+exec with `setrlimit`, process‑group kill, and an executor boundary — in a pure‑C runtime. | Usually shells out with no OS confinement. |
-| **Footprint** | Pure C23, allocation‑free hot paths, caller‑provided buffers, no `malloc`/`assert`/GC; runs on constrained targets. | Python/Node runtimes; heavy dependencies. |
+| Axis                        | sporegeist                                                                                                                        | Typical agent frameworks (LangChain/LangGraph, AutoGPT, CrewAI)                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Governance**              | A **mandatory** policy gate (capability + budget) on *every* action — constitutive, not optional middleware.                      | Guardrails are opt‑in middleware bolted around the loop.                                     |
+| **Determinism & audit**     | Hash‑chained journal with logical timestamps → **byte‑identical replay**, plus an optional **keyed HMAC seal** (tamper‑evidence). | Non‑deterministic by default; tracing is best‑effort.                                        |
+| **Self‑improvement safety** | Learned changes are gated by the eval harness — **kept only if no regression**, else reverted.                                    | "Self‑improving" demos rarely have an automatic regression gate; memory edits are unguarded. |
+| **Sandboxed execution**     | `local_shell` runs through fork+exec with `setrlimit`, process‑group kill, and an executor boundary — in a pure‑C runtime.        | Usually shells out with no OS confinement.                                                   |
+| **Footprint**               | Pure C23, allocation‑free hot paths, caller‑provided buffers, no `malloc`/`assert`/GC; runs on constrained targets.               | Python/Node runtimes; heavy dependencies.                                                    |
 
 The combination — *mandatory gating + deterministic replay + eval‑gated
 self‑improvement* in one allocation‑free C core — is, as far as we can tell, not
@@ -171,18 +171,18 @@ architecture is built so a stronger model drops in without touching the spine.
 
 ## Layout
 
-| Path | Role |
-|---|---|
-| `src/run/` | orchestrator tick, agent loop, agent runner |
-| `src/actor/`, `src/context/` | perception: context assembly + recommendation parsing |
-| `src/policy/`, `src/executor/` | policy gate + execution boundary |
-| `src/exec/` | sandboxed command executor, shell executor, host probe |
-| `src/memory/` | mind‑palace store + memory executor |
-| `src/sim/` | security simulator + risk model |
-| `src/eval/`, `src/improve/` | evaluation harness + self‑improvement loop |
-| `src/journal/`, `src/core/`, `src/dsl/` | hash‑chained journal, primitives, s‑expression DSL |
-| `src/cli/`, `src/chat/` | CLI and chat REPL surfaces |
-| `deps/geist/` | the external inference engine (pinned `v0.2.1`) |
+| Path                                    | Role                                                   |
+| --------------------------------------- | ------------------------------------------------------ |
+| `src/run/`                              | orchestrator tick, agent loop, agent runner            |
+| `src/actor/`, `src/context/`            | perception: context assembly + recommendation parsing  |
+| `src/policy/`, `src/executor/`          | policy gate + execution boundary                       |
+| `src/exec/`                             | sandboxed command executor, shell executor, host probe |
+| `src/memory/`                           | mind‑palace store + memory executor                    |
+| `src/sim/`                              | security simulator + risk model                        |
+| `src/eval/`, `src/improve/`             | evaluation harness + self‑improvement loop             |
+| `src/journal/`, `src/core/`, `src/dsl/` | hash‑chained journal, primitives, s‑expression DSL     |
+| `src/cli/`, `src/chat/`                 | CLI and chat REPL surfaces                             |
+| `deps/geist/`                           | the external inference engine (pinned `v0.2.1`)        |
 
 ## Constraints
 

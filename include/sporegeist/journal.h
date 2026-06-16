@@ -3,6 +3,7 @@
 
 #include "sporegeist/status.h"
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -93,6 +94,31 @@ spg_journal_reader_next(struct spg_journal_reader *reader,
                         struct spg_journal_record *out);
 [[nodiscard]] enum spg_status
 spg_journal_reader_close(struct spg_journal_reader *reader);
+
+/* ---- Sealing (keyed tamper-evidence) ----
+ * The hash chain already makes every record's hash depend on all prior records,
+ * so the final record hash commits to the whole log. Sealing writes an HMAC tag
+ * over that final hash, keyed with a secret. An attacker who edits a record and
+ * re-chains every hash still cannot reproduce the tag without the key; a holder
+ * of the key can verify the log is intact and authentic. Symmetric — this is
+ * tamper-evidence, not third-party non-repudiation. */
+
+/* Verify the chain, then write the HMAC tag over the final chain hash to
+ * sig_path (64 lowercase hex chars + newline). SPG_E_JOURNAL_CORRUPT if the
+ * chain is broken; SPG_E_IO on write failure. */
+[[nodiscard]] enum spg_status spg_journal_seal(const char *journal_path,
+                                               const char *sig_path,
+                                               size_t key_n,
+                                               const uint8_t key[]);
+
+/* Re-verify the chain and the tag in sig_path against the key; *ok receives the
+ * verdict (false on a broken chain, a missing/garbled sig, or a tag mismatch).
+ * Returns SPG_OK once the check ran; an error only on journal read failure. */
+[[nodiscard]] enum spg_status spg_journal_verify_signed(const char *journal_path,
+                                                        const char *sig_path,
+                                                        size_t key_n,
+                                                        const uint8_t key[],
+                                                        bool *ok);
 
 #ifdef __cplusplus
 }

@@ -55,7 +55,8 @@ static void print_usage(const char *argv0) {
             "  eval             score a scripted agent suite (JSONL report)\n"
             "  improve          learn lessons from eval failures into memory\n"
             "  replay           print a journal timeline as JSONL\n"
-            "  verify-journal   verify and summarize a journal\n"
+            "  verify-journal   verify a journal (+ --key <f> checks the seal)\n"
+            "  seal-journal     write a keyed HMAC seal over a journal\n"
             "  policy-check     validate and summarize a policy file\n"
             "  sim-validate     validate and summarize a scenario file\n",
             argv0);
@@ -88,7 +89,10 @@ static void print_run_usage(const char *argv0) {
 }
 
 static void print_verify_journal_usage(const char *argv0) {
-    fprintf(stderr, "usage: %s verify-journal <journal.sgj>\n", argv0);
+    fprintf(stderr,
+            "usage: %s verify-journal <journal.sgj> [--key <keyfile>] "
+            "[--sig <path>]\n",
+            argv0);
 }
 
 static void print_replay_usage(const char *argv0) {
@@ -2467,6 +2471,85 @@ static int improve_command(int argc, char **argv) {
     return 0;
 }
 
+/* Build "<journal>.sig" (or copy an explicit path) into out. */
+static void default_sig_path(const char *journal, const char *explicit_sig,
+                             char *out, const size_t cap) {
+    if (explicit_sig != nullptr) {
+        (void)snprintf(out, cap, "%s", explicit_sig);
+    } else {
+        (void)snprintf(out, cap, "%s.sig", journal);
+    }
+}
+
+static int seal_journal_command(int argc, char **argv) {
+    const char *journal  = nullptr;
+    const char *key_path = nullptr;
+    const char *sig      = nullptr;
+    for (int i = 2; i < argc; i += 1) {
+        if (strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
+            key_path = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--sig") == 0 && i + 1 < argc) {
+            sig = argv[++i];
+            continue;
+        }
+        if (journal == nullptr && argv[i][0] != '-') {
+            journal = argv[i];
+            continue;
+        }
+        fprintf(stderr, "seal-journal: unexpected argument: %s\n", argv[i]);
+        return 2;
+    }
+    if (journal == nullptr || key_path == nullptr) {
+        fprintf(stderr,
+                "usage: %s seal-journal <journal> --key <keyfile> [--sig <p>]\n",
+                argv[0]);
+        return 2;
+    }
+    struct file_buffer keyb = {};
+    if (read_file(key_path, &keyb) != SPG_OK || keyb.n == 0u) {
+        fprintf(stderr, "seal-journal: cannot read key %s\n", key_path);
+        free_file_buffer(&keyb);
+        return 1;
+    }
+    char sigpath[CLI_PATH_MAX];
+    default_sig_path(journal, sig, sigpath, sizeof sigpath);
+    const enum spg_status s =
+        spg_journal_seal(journal, sigpath, keyb.n, (const uint8_t *)keyb.data);
+    free_file_buffer(&keyb);
+    if (s != SPG_OK) {
+        fprintf(stderr, "seal-journal: %s\n", spg_status_to_string(s));
+        return 1;
+    }
+    printf("sealed=%s\n", sigpath);
+    return 0;
+}
+
+/* Verify a journal's keyed seal; prints signed=true/false, non-zero on mismatch. */
+static int verify_signed_cli(const char *journal, const char *key_path,
+                             const char *sig) {
+    struct file_buffer keyb = {};
+    if (read_file(key_path, &keyb) != SPG_OK || keyb.n == 0u) {
+        fprintf(stderr, "verify-journal: cannot read key %s\n", key_path);
+        free_file_buffer(&keyb);
+        return 1;
+    }
+    char sigpath[CLI_PATH_MAX];
+    default_sig_path(journal, sig, sigpath, sizeof sigpath);
+    bool                  ok = false;
+    const enum spg_status s  = spg_journal_verify_signed(
+        journal, sigpath, keyb.n, (const uint8_t *)keyb.data, &ok);
+    free_file_buffer(&keyb);
+    if (s != SPG_OK) {
+        fprintf(stderr, "verify-journal: signed check failed: %s\n",
+                spg_status_to_string(s));
+        return 1;
+    }
+    printf("signed=%s\n", ok ? "true" : "false");
+    return ok ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
     if (argc < 2) {
         print_usage(argv[0]);
@@ -2520,11 +2603,38 @@ int main(int argc, char **argv) {
     }
 
     if (strcmp(argv[1], "verify-journal") == 0) {
-        if (argc != 3) {
+        const char *journal  = nullptr;
+        const char *key_path = nullptr;
+        const char *sig      = nullptr;
+        for (int i = 2; i < argc; i += 1) {
+            if (strcmp(argv[i], "--key") == 0 && i + 1 < argc) {
+                key_path = argv[++i];
+                continue;
+            }
+            if (strcmp(argv[i], "--sig") == 0 && i + 1 < argc) {
+                sig = argv[++i];
+                continue;
+            }
+            if (journal == nullptr && argv[i][0] != '-') {
+                journal = argv[i];
+                continue;
+            }
+            journal = nullptr; /* force usage on a bad argument */
+            break;
+        }
+        if (journal == nullptr) {
             print_verify_journal_usage(argv[0]);
             return 2;
         }
-        return verify_journal_command(argv[2]);
+        const int chain_rc = verify_journal_command(journal);
+        if (chain_rc != 0 || key_path == nullptr) {
+            return chain_rc;
+        }
+        return verify_signed_cli(journal, key_path, sig);
+    }
+
+    if (strcmp(argv[1], "seal-journal") == 0) {
+        return seal_journal_command(argc, argv);
     }
 
     if (strcmp(argv[1], "replay") == 0) {
