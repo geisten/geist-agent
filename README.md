@@ -149,7 +149,9 @@ sporegeist is arguably **ahead** of them.
   not expose logit masking), so the model must emit a custom s‑expression
   grammar from free text — which small models do unreliably. Real‑model runs
   today frequently end in `rejected`. Frontier‑model agents with native
-  function‑calling and explicit planning are far ahead here.
+  function‑calling and explicit planning are far ahead here. A **remote model
+  adapter** (in progress — see Roadmap) lets the *same* governed loop drive a
+  frontier model, closing this gap without touching the spine.
 - **Memory.** The mind‑palace is recency/keyword‑ranked Markdown — no embeddings
   or semantic retrieval. Behind SOTA agent memory.
 - **No planner / multi‑agent.** One action per tick; the loop is multi‑step but
@@ -168,6 +170,28 @@ sporegeist is **SOTA‑grade on governance, determinism, auditability, and
 self‑improvement *safety*** — and deliberately minimal (and behind) on raw agent
 *capability*. It is the chassis and the safety system, not yet the engine. The
 architecture is built so a stronger model drops in without touching the spine.
+
+## Roadmap
+
+The central bet — *the model is a swappable component; the governance is the
+product* — sets the near‑term direction: **drive a strong external model from
+the same governed loop** rather than compete on local‑model capability.
+
+- **Remote model adapter** *(in progress)*. A third `model_adapter` mode beside
+  FAKE/GEIST that calls an **OpenAI‑compatible `/v1/chat/completions`** endpoint
+  over libcurl. One URL selects a cloud frontier model *or* a local server
+  (ollama / llama.cpp / vLLM), so "strong cloud brain" vs. "offline/edge" is a
+  deployment choice, not a rewrite. The JSON request/response **codec is pure,
+  allocation‑free, and unit‑tested in the default build**; the libcurl transport
+  is an opt‑in compile flag (`make REMOTE=1`) so the default build keeps **zero
+  new dependencies**. Honest limit: remote inference is non‑deterministic, but
+  **journal replay stays byte‑identical** (it replays recorded I/O), and the HTTP
+  call is inference *transport* — not a governed action — so the policy gate and
+  audit trail are unchanged. The API key is read only from `SPOREGEIST_API_KEY`
+  (never an argument, never logged, never journaled).
+- **Verifiable audit** *(started)*. The shipped keyed **HMAC seal** is symmetric
+  tamper‑evidence; asymmetric signatures (**Ed25519**) for third‑party
+  non‑repudiation are the next step.
 
 ## Layout
 

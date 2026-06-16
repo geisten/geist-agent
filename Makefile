@@ -54,7 +54,7 @@ else
     GEIST_LINK_FLAGS :=
 endif
 
-CPPFLAGS := -Iinclude -Iinclude/sporegeist -I$(GEIST_DIR)/include -I$(GEIST_DIR)
+CPPFLAGS := -Iinclude -Iinclude/sporegeist -I$(GEIST_DIR)/include -I$(GEIST_DIR) -I$(DEPS_DIR)/jsmn
 WARNINGS := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
 CFLAGS := -std=c23 $(WARNINGS) $(SPG_OPT_FLAGS) $(CPPFLAGS)
 LDLIBS := $(GEIST_LINK_FLAGS) -lm -lpthread
@@ -90,6 +90,7 @@ SPG_SOURCES := \
     src/memory/mem_store.c \
     src/memory/memory.c \
     src/model/model_adapter.c \
+    src/model/model_remote_codec.c \
     src/model/model_resolve.c \
     src/policy/policy.c \
     src/policy/policy_config.c \
