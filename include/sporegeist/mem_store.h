@@ -25,8 +25,22 @@ extern "C" {
 #    define SPG_MEM_PATH_MAX 4096
 #endif
 
+/* Upper bound on the rendered index: SPG_MEM_INDEX_TOPK lines (each at most
+ * "- <slug>: <desc>\n") plus the trailing "... N more" pointer line. */
+#define SPG_MEM_INDEX_CACHE_BYTES                                              \
+    (SPG_MEM_INDEX_TOPK * (SPG_MEM_SLUG_MAX + SPG_MEM_DESC_MAX + 8u) + 64u)
+
 struct spg_mem_store {
     char dir[SPG_MEM_PATH_MAX];
+    /* Lazily rebuilt cache of the rendered mind-palace index, invalidated on
+     * save/delete. Lets spg_mem_index serve the per-tick context-injection path
+     * without re-scanning (and re-parsing) the whole directory each call. The
+     * cache is only consistent for mutations made through this same store
+     * instance, which matches the single-threaded, one-store-per-run design. */
+    char   index_cache[SPG_MEM_INDEX_CACHE_BYTES];
+    size_t index_len;       /* rendered bytes held in index_cache */
+    bool   index_truncated; /* cached *truncated out-value */
+    bool   index_valid;     /* false => cache cold/stale, rebuild on next read */
 };
 
 /* Bind store to a directory, creating it if missing. Returns SPG_E_INVALID_ARG

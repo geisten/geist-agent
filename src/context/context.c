@@ -1,6 +1,6 @@
 #include "sporegeist/context.h"
 
-#include <stdio.h>
+#include <string.h>
 
 static uint64_t remaining(const uint64_t configured, const uint64_t consumed) {
     return consumed >= configured ? 0u : configured - consumed;
@@ -367,37 +367,41 @@ static void append_char(struct render_state *state, const char ch) {
     state->required += 1u;
 }
 
-static void append_bytes(struct render_state *state, const size_t n,
-                         const char bytes[static n]) {
-    for (size_t i = 0u; i < n; i += 1u) {
-        append_char(state, bytes[i]);
+/* Block append with the same one-byte-reserved invariant as append_char: never
+ * fills the last slot (it is kept for the terminating NUL) and always counts the
+ * full length into required so the caller can size dst exactly. */
+static void append_span(struct render_state *state, const size_t n,
+                        const char bytes[static n]) {
+    if (state->used + 1u < state->capacity) {
+        const size_t room = state->capacity - 1u - state->used;
+        const size_t take = n < room ? n : room;
+        memcpy(state->dst + state->used, bytes, take);
+        state->used += take;
     }
+    state->required += n;
 }
 
 static void append_cstr(struct render_state *state, const char *text) {
     if (text == nullptr) {
         return;
     }
-    for (size_t i = 0u; text[i] != '\0'; i += 1u) {
-        append_char(state, text[i]);
-    }
+    append_span(state, strlen(text), text);
 }
 
-static void append_u64(struct render_state *state, const uint64_t value) {
-    char buffer[32];
-    const int n = snprintf(buffer, sizeof buffer, "%llu",
-                           (unsigned long long)value);
-    if (n > 0) {
-        append_bytes(state, (size_t)n, buffer);
-    }
+/* Decimal-format an unsigned without snprintf's format parsing: fill a stack
+ * buffer back-to-front, then block-append the digit run. */
+static void append_u64(struct render_state *state, uint64_t value) {
+    char   buffer[sizeof(uint64_t) * 3u + 1u];
+    size_t i = sizeof buffer;
+    do {
+        buffer[--i] = (char)('0' + (unsigned)(value % 10u));
+        value /= 10u;
+    } while (value != 0u);
+    append_span(state, sizeof buffer - i, buffer + i);
 }
 
 static void append_u32(struct render_state *state, const uint32_t value) {
-    char buffer[16];
-    const int n = snprintf(buffer, sizeof buffer, "%u", (unsigned)value);
-    if (n > 0) {
-        append_bytes(state, (size_t)n, buffer);
-    }
+    append_u64(state, value);
 }
 
 static const char *graph_kind_name(const enum spg_graph_node_kind kind) {

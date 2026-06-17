@@ -187,6 +187,47 @@ static int test_invalid_args(void) {
     return 0;
 }
 
+/* The index is served from a per-store cache that must be invalidated on every
+ * save and delete; a stale cache would silently return outdated context. Read
+ * first (populating the cache), then mutate, then read again and require the
+ * change to be reflected. Repeated reads must be byte-identical. */
+static int test_index_cache_invalidation(void) {
+    struct spg_mem_store store;
+    char                 dir[64];
+    if (open_temp(&store, dir) != 0) {
+        return 1;
+    }
+    if (spg_mem_save(&store, "alpha", "first", "a") != SPG_OK) {
+        return 1;
+    }
+    char   idx1[512];
+    char   idx2[512];
+    size_t required = 0u;
+    bool   trunc    = false;
+    /* Populate the cache, then read again: identical bytes and length. */
+    if (spg_mem_index(&store, sizeof idx1, idx1, &required, &trunc) != SPG_OK ||
+        spg_mem_index(&store, sizeof idx2, idx2, &required, &trunc) != SPG_OK ||
+        strcmp(idx1, idx2) != 0 || required != strlen(idx1)) {
+        return 1;
+    }
+    if (strstr(idx1, "- alpha: first") == nullptr) {
+        return 1;
+    }
+    /* A save after a cached read must surface in the next read. */
+    if (spg_mem_save(&store, "beta", "second", "b") != SPG_OK ||
+        spg_mem_index(&store, sizeof idx2, idx2, &required, &trunc) != SPG_OK ||
+        strstr(idx2, "- beta: second") == nullptr) {
+        return 1;
+    }
+    /* A delete after a cached read must surface too. */
+    if (spg_mem_delete(&store, "beta") != SPG_OK ||
+        spg_mem_index(&store, sizeof idx2, idx2, &required, &trunc) != SPG_OK ||
+        strstr(idx2, "beta") != nullptr) {
+        return 1;
+    }
+    return 0;
+}
+
 int main(void) {
     if (test_slug_validation() != 0) {
         fprintf(stderr, "test_slug_validation failed\n");
@@ -206,6 +247,10 @@ int main(void) {
     }
     if (test_index() != 0) {
         fprintf(stderr, "test_index failed\n");
+        return 1;
+    }
+    if (test_index_cache_invalidation() != 0) {
+        fprintf(stderr, "test_index_cache_invalidation failed\n");
         return 1;
     }
     if (test_limits() != 0) {

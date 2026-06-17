@@ -39,12 +39,22 @@ static void store32(uint8_t out[static 4], const uint32_t word) {
     out[3] = (uint8_t)((word >> 24u) & 0xffu);
 }
 
+/* Load up to 64 bytes of a block as 16 little-endian 32-bit words. The BLAKE3
+ * block is defined little-endian, so on a little-endian host the bytes map
+ * directly: copy the n present bytes and zero-pad the rest (one memcpy + one
+ * memset instead of a per-byte shift/or loop). Big-endian hosts fall back to the
+ * explicit packing. */
 static void words_from_block(size_t n, const uint8_t block[],
                              uint32_t words[static 16]) {
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+    memcpy(words, block, n);
+    memset((uint8_t *)words + n, 0, 16u * sizeof(uint32_t) - n);
+#else
     memset(words, 0, 16u * sizeof(uint32_t));
     for (size_t i = 0u; i < n; i += 1u) {
         words[i / 4u] |= (uint32_t)block[i] << (8u * (uint32_t)(i % 4u));
     }
+#endif
 }
 
 static void g(uint32_t state[static 16], const size_t a, const size_t b,
@@ -143,26 +153,24 @@ static struct blake3_output chunk_output(const uint8_t chunk[static 1],
         .block_len = 0u,
         .flags     = CHUNK_START | CHUNK_END,
     };
-    memcpy(output.input_cv, cv, sizeof(cv));
 
     size_t offset = 0u;
     while (offset < chunk_len || (chunk_len == 0u && offset == 0u)) {
         const size_t remaining = chunk_len - offset;
         const size_t block_len =
             remaining < SPG_HASH_BLOCK_BYTES ? remaining : SPG_HASH_BLOCK_BYTES;
-        uint32_t block_words[16] = {};
-        words_from_block(block_len, chunk + offset, block_words);
 
         const bool is_start = offset == 0u;
         const bool is_end   = offset + block_len == chunk_len;
-        const uint32_t flags =
-            (is_start ? CHUNK_START : 0u) | (is_end ? CHUNK_END : 0u);
 
+        /* Fill the output's fields directly: load the block words in place
+         * (words_from_block writes all 64 bytes) instead of staging them in a
+         * local and copying. The running chaining value feeds input_cv. */
         memcpy(output.input_cv, cv, sizeof(cv));
-        memcpy(output.block_words, block_words, sizeof(block_words));
+        words_from_block(block_len, chunk + offset, output.block_words);
         output.counter   = chunk_counter;
-        output.block_len = (uint32_t)block_len;
-        output.flags     = flags;
+        output.block_len  = (uint32_t)block_len;
+        output.flags = (is_start ? CHUNK_START : 0u) | (is_end ? CHUNK_END : 0u);
 
         if (!is_end) {
             output_chaining_value(&output, cv);

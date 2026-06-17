@@ -1,7 +1,6 @@
 #include "sporegeist/sexpr.h"
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
 static void set_error(struct spg_sexpr_error *error,
@@ -430,23 +429,28 @@ enum spg_status spg_sexpr_writer_append_text(struct spg_sexpr_writer *writer,
     return SPG_OK;
 }
 
+/* Decimal-format an unsigned into a NUL-terminated buffer without snprintf's
+ * format parsing: fill back-to-front and return the pointer to the first digit.
+ * The buffer is sized for the widest unsigned (3 digits per byte + NUL). */
+static char *u64_to_dec(uint64_t value, char buffer[static 21]) {
+    size_t i  = 21u;
+    buffer[--i] = '\0';
+    do {
+        buffer[--i] = (char)('0' + (unsigned)(value % 10u));
+        value /= 10u;
+    } while (value != 0u);
+    return buffer + i;
+}
+
 enum spg_status spg_sexpr_writer_append_u64(struct spg_sexpr_writer *writer,
                                             const uint64_t value) {
-    char buffer[32];
-    const int n =
-        snprintf(buffer, sizeof buffer, "%llu", (unsigned long long)value);
-    if (n < 0) {
-        return SPG_E_INTERNAL;
-    }
-    return spg_sexpr_writer_append_text(writer, buffer);
+    char buffer[21];
+    return spg_sexpr_writer_append_text(writer, u64_to_dec(value, buffer));
 }
 
 enum spg_status spg_sexpr_writer_append_size(struct spg_sexpr_writer *writer,
                                              const size_t value) {
-    char buffer[32];
-    const int n = snprintf(buffer, sizeof buffer, "%zu", value);
-    if (n < 0) {
-        return SPG_E_INTERNAL;
-    }
-    return spg_sexpr_writer_append_text(writer, buffer);
+    char buffer[21];
+    return spg_sexpr_writer_append_text(writer, u64_to_dec((uint64_t)value,
+                                                           buffer));
 }

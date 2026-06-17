@@ -53,6 +53,9 @@ enum spg_status spg_mem_store_open(struct spg_mem_store *store,
         return SPG_E_LIMIT;
     }
     memcpy(store->dir, dir, n + 1u);
+    store->index_len       = 0u;
+    store->index_truncated = false;
+    store->index_valid     = false;
     if (mkdir(store->dir, 0755) != 0 && errno != EEXIST) {
         return SPG_E_IO;
     }
@@ -178,6 +181,16 @@ struct mem_entry {
     uint64_t updated;
 };
 
+/* Shared scratch for the directory-collection helpers (save, delete's index
+ * regeneration, and the index-cache rebuild). One SPG_MEM_MAX_FILES array (~one
+ * mem_entry per file) instead of a separate static per function keeps the BSS
+ * footprint to a single buffer. Safe because the mind-palace runs on one thread
+ * (the governed loop is single-threaded by design) and these helpers never nest:
+ * each fills the scratch and fully drains it before returning, and none calls
+ * another that reuses it. NOT reentrant — do not use from a signal handler or a
+ * second thread. */
+static struct mem_entry g_collect_scratch[SPG_MEM_MAX_FILES];
+
 /* Recency order: higher "updated" first, slug ascending as a stable tiebreak. */
 static bool entry_before(const struct mem_entry *a, const struct mem_entry *b) {
     if (a->updated != b->updated) {
@@ -223,57 +236,15 @@ static size_t collect_by_recency(const struct spg_mem_store *store,
     return count;
 }
 
-/* Highest "updated" counter currently in the store (0 when empty). */
-static uint64_t max_updated(const struct spg_mem_store *store) {
-    DIR *d = opendir(store->dir);
-    if (d == nullptr) {
-        return 0u;
-    }
-    uint64_t       mx = 0u;
-    struct dirent *e;
-    while ((e = readdir(d)) != nullptr) {
-        if (!is_memory_file(e->d_name)) {
-            continue;
-        }
-        const size_t nm = strlen(e->d_name) - 3u;
-        if (nm + 1u > SLUGBUF) {
-            continue;
-        }
-        char slug[SLUGBUF];
-        memcpy(slug, e->d_name, nm);
-        slug[nm] = '\0';
-        char path[SPG_MEM_PATH_MAX];
-        if (build_path(store, slug, ".md", path, sizeof path) != SPG_OK) {
-            continue;
-        }
-        uint64_t u = 0u;
-        read_meta(path, nullptr, 0u, &u);
-        if (u > mx) {
-            mx = u;
-        }
-    }
-    (void)closedir(d);
-    return mx;
-}
-
-static size_t count_memories(const struct spg_mem_store *store) {
-    DIR *d = opendir(store->dir);
-    if (d == nullptr) {
-        return 0u;
-    }
-    size_t         count = 0u;
-    struct dirent *e;
-    while ((e = readdir(d)) != nullptr) {
-        if (is_memory_file(e->d_name)) {
-            count += 1u;
-        }
-    }
-    (void)closedir(d);
-    return count;
-}
-
-/* Rewrite <dir>/MEMORY.md with the full index, atomically. Best-effort. */
-static void regenerate_index(const struct spg_mem_store *store) {
+/* Rewrite <dir>/MEMORY.md atomically from `count` recency-ordered entries.
+ * Best-effort. When upsert_slug is non-null its line is written first (it models
+ * a just-completed save, which always ranks most-recent) using upsert_desc, and
+ * any existing entry with that slug is skipped — so a save needs no second
+ * directory scan. upsert_desc is leading-space-stripped to stay byte-identical
+ * with a read_meta round-trip of the written frontmatter. */
+static void write_index(const struct spg_mem_store *store,
+                        const struct mem_entry entries[], const size_t count,
+                        const char *upsert_slug, const char *upsert_desc) {
     char tmp[SPG_MEM_PATH_MAX];
     char dst[SPG_MEM_PATH_MAX];
     if (build_path(store, "MEMORY", ".md.tmp", tmp, sizeof tmp) != SPG_OK ||
@@ -284,9 +255,18 @@ static void regenerate_index(const struct spg_mem_store *store) {
     if (f == nullptr) {
         return;
     }
-    static struct mem_entry entries[SPG_MEM_MAX_FILES];
-    const size_t count = collect_by_recency(store, entries, SPG_MEM_MAX_FILES);
+    if (upsert_slug != nullptr) {
+        const char *d = upsert_desc;
+        while (*d == ' ') {
+            d += 1u;
+        }
+        (void)fprintf(f, "- %s: %s\n", upsert_slug, d);
+    }
     for (size_t i = 0u; i < count; i += 1u) {
+        if (upsert_slug != nullptr &&
+            strcmp(entries[i].slug, upsert_slug) == 0) {
+            continue;
+        }
         (void)fprintf(f, "- %s: %s\n", entries[i].slug, entries[i].desc);
     }
     if (fclose(f) == 0) {
@@ -294,6 +274,13 @@ static void regenerate_index(const struct spg_mem_store *store) {
     } else {
         (void)remove(tmp);
     }
+}
+
+/* Rewrite <dir>/MEMORY.md with the full index from a fresh scan. Best-effort. */
+static void regenerate_index(const struct spg_mem_store *store) {
+    const size_t count =
+        collect_by_recency(store, g_collect_scratch, SPG_MEM_MAX_FILES);
+    write_index(store, g_collect_scratch, count, nullptr, nullptr);
 }
 
 enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
@@ -305,7 +292,8 @@ enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
     if (strchr(description, '\n') != nullptr) {
         return SPG_E_INVALID_ARG; /* would break the frontmatter */
     }
-    if (strlen(description) > SPG_MEM_DESC_MAX || strlen(body) > SPG_MEM_BODY_MAX) {
+    const size_t body_n = strlen(body);
+    if (strlen(description) > SPG_MEM_DESC_MAX || body_n > SPG_MEM_BODY_MAX) {
         return SPG_E_LIMIT;
     }
 
@@ -315,13 +303,20 @@ enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
         build_path(store, slug, ".md.tmp", tmp, sizeof tmp) != SPG_OK) {
         return SPG_E_LIMIT;
     }
-    if (!file_exists(path) && count_memories(store) >= SPG_MEM_MAX_FILES) {
+    /* One pre-write scan supplies everything the save needs: the current entry
+     * set (reused to rebuild the index without a second scan), the file count
+     * (capacity check) and the highest "updated" counter (recency bump). The
+     * scan is recency-sorted, so entries[0] holds the maximum. */
+    const size_t count =
+        collect_by_recency(store, g_collect_scratch, SPG_MEM_MAX_FILES);
+    if (!file_exists(path) && count >= SPG_MEM_MAX_FILES) {
         return SPG_E_LIMIT;
     }
 
     /* A re-save bumps the slug above every existing memory, so the index ranks
      * it most-recent. */
-    const uint64_t updated = max_updated(store) + 1u;
+    const uint64_t updated =
+        (count > 0u ? g_collect_scratch[0].updated : 0u) + 1u;
 
     FILE *f = fopen(tmp, "wb");
     if (f == nullptr) {
@@ -330,7 +325,7 @@ enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
     const int w =
         fprintf(f, "---\nname: %s\ndescription: %s\nupdated: %llu\n---\n%s", slug,
                 description, (unsigned long long)updated, body);
-    const bool body_nl = body[0] == '\0' || body[strlen(body) - 1u] == '\n';
+    const bool body_nl = body_n == 0u || body[body_n - 1u] == '\n';
     if (w >= 0 && !body_nl) {
         (void)fputc('\n', f);
     }
@@ -342,7 +337,10 @@ enum spg_status spg_mem_save(struct spg_mem_store *store, const char *slug,
         (void)remove(tmp);
         return SPG_E_IO;
     }
-    regenerate_index(store);
+    /* Rebuild the index from the pre-write set plus this upsert — no rescan.
+     * g_collect_scratch still holds the pre-write set from above. */
+    write_index(store, g_collect_scratch, count, slug, description);
+    store->index_valid = false; /* in-RAM read cache is now stale */
     return SPG_OK;
 }
 
@@ -361,6 +359,7 @@ enum spg_status spg_mem_delete(struct spg_mem_store *store, const char *slug) {
         return SPG_E_IO;
     }
     regenerate_index(store);
+    store->index_valid = false; /* in-RAM read cache is now stale */
     return SPG_OK;
 }
 
@@ -404,39 +403,30 @@ enum spg_status spg_mem_read(struct spg_mem_store *store, const char *slug,
     return over ? SPG_E_LIMIT : SPG_OK;
 }
 
-enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
-                              char dst[], size_t *out_required,
-                              bool *truncated) {
-    if (store == nullptr || dst == nullptr || dst_cap == 0u) {
-        return SPG_E_INVALID_ARG;
-    }
-    static struct mem_entry entries[SPG_MEM_MAX_FILES];
-    const size_t count = collect_by_recency(store, entries, SPG_MEM_MAX_FILES);
+/* Render the full index (TOPK lines + "N more" pointer) into the store cache,
+ * which is sized to hold the maximum so nothing is clipped, and mark it valid.
+ * This is the one directory scan; repeated reads then serve from the cache. */
+static void rebuild_index_cache(struct spg_mem_store *store) {
+    const size_t count =
+        collect_by_recency(store, g_collect_scratch, SPG_MEM_MAX_FILES);
 
-    dst[0]              = '\0';
-    size_t used         = 0u;
-    size_t required     = 0u;
-    bool   over         = false;
-    bool   trunc        = false;
+    const size_t cap   = sizeof store->index_cache;
+    size_t       used  = 0u;
+    bool         trunc = false;
 
     const size_t shown = count < SPG_MEM_INDEX_TOPK ? count : SPG_MEM_INDEX_TOPK;
     for (size_t i = 0u; i < shown; i += 1u) {
         char line[SPG_MEM_SLUG_MAX + SPG_MEM_DESC_MAX + 8u];
         const int ln = snprintf(line, sizeof line, "- %s: %s\n",
-                                entries[i].slug, entries[i].desc);
+                                g_collect_scratch[i].slug,
+                                g_collect_scratch[i].desc);
         if (ln < 0) {
             continue;
         }
-        const size_t n    = (size_t)ln;
-        required         += n;
-        const size_t room = used < dst_cap - 1u ? dst_cap - 1u - used : 0u;
-        const size_t take = n < room ? n : room;
-        if (take > 0u) {
-            memcpy(dst + used, line, take);
-            used += take;
-        }
-        if (take < n) {
-            over = true;
+        const size_t n = (size_t)ln;
+        if (used + n <= cap) {
+            memcpy(store->index_cache + used, line, n);
+            used += n;
         }
     }
     if (count > SPG_MEM_INDEX_TOPK) {
@@ -445,27 +435,38 @@ enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
         const int ln = snprintf(ptr, sizeof ptr, "- ... %zu more (memory list)\n",
                                 count - SPG_MEM_INDEX_TOPK);
         if (ln > 0) {
-            const size_t n    = (size_t)ln;
-            required         += n;
-            const size_t room = used < dst_cap - 1u ? dst_cap - 1u - used : 0u;
-            const size_t take = n < room ? n : room;
-            if (take > 0u) {
-                memcpy(dst + used, ptr, take);
-                used += take;
-            }
-            if (take < n) {
-                over = true;
+            const size_t n = (size_t)ln;
+            if (used + n <= cap) {
+                memcpy(store->index_cache + used, ptr, n);
+                used += n;
             }
         }
     }
-    dst[used] = '\0';
+    store->index_len       = used;
+    store->index_truncated = trunc;
+    store->index_valid     = true;
+}
+
+enum spg_status spg_mem_index(struct spg_mem_store *store, const size_t dst_cap,
+                              char dst[], size_t *out_required,
+                              bool *truncated) {
+    if (store == nullptr || dst == nullptr || dst_cap == 0u) {
+        return SPG_E_INVALID_ARG;
+    }
+    if (!store->index_valid) {
+        rebuild_index_cache(store);
+    }
+    const size_t len  = store->index_len;
+    const size_t copy = len < dst_cap - 1u ? len : dst_cap - 1u;
+    memcpy(dst, store->index_cache, copy);
+    dst[copy] = '\0';
     if (out_required != nullptr) {
-        *out_required = required;
+        *out_required = len;
     }
     if (truncated != nullptr) {
-        *truncated = trunc;
+        *truncated = store->index_truncated;
     }
-    return over ? SPG_E_LIMIT : SPG_OK;
+    return len > dst_cap - 1u ? SPG_E_LIMIT : SPG_OK;
 }
 
 enum spg_status spg_mem_list(struct spg_mem_store *store, const size_t cap,
@@ -474,6 +475,8 @@ enum spg_status spg_mem_list(struct spg_mem_store *store, const size_t cap,
     if (store == nullptr || slugs == nullptr || count == nullptr) {
         return SPG_E_INVALID_ARG;
     }
+    /* Slug-sorted scratch (distinct from the recency scratch above). Same
+     * single-threaded, non-reentrant contract as g_collect_scratch. */
     static char  all[SPG_MEM_MAX_FILES][SLUGBUF];
     const size_t total = collect_sorted(store, all, SPG_MEM_MAX_FILES);
     const size_t n     = total < cap ? total : cap;
