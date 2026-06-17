@@ -2111,10 +2111,21 @@ static bool eval_termination(const struct spg_sexpr_node *nodes,
 #define EVAL_MAX_CASES 64u
 
 struct eval_run_report {
-    size_t                      total;
-    size_t                      passed;
+    size_t                      total;  /* individual runs (cases x samples)   */
+    size_t                      passed; /* individual passing runs             */
+    size_t                      ncases; /* distinct cases (index into the rest) */
     char                        names[EVAL_MAX_CASES][64];
-    struct spg_eval_case_result results[EVAL_MAX_CASES];
+    struct spg_eval_case_result results[EVAL_MAX_CASES]; /* last sample/case   */
+    size_t                      runs[EVAL_MAX_CASES];        /* samples per case */
+    size_t                      case_passed[EVAL_MAX_CASES]; /* k passed of N    */
+};
+
+/* Per-invocation knobs. A null pointer (or zeroed struct) reproduces the
+ * historical behaviour: one sample per case, no remote endpoint. */
+struct eval_run_opts {
+    const char *remote_url;   /* nullable: enables (model "remote") cases      */
+    const char *remote_model; /* nullable: model name for remote cases         */
+    size_t      samples;      /* 0/1 => run each case once                     */
 };
 
 /* Load a suite + its shared run/policy/scenario config and run every case with
@@ -2122,6 +2133,7 @@ struct eval_run_report {
  * Returns SPG_OK on a complete run. Prints nothing (the caller reports). */
 static enum spg_status eval_run_suite(const char *suite_path,
                                       struct spg_mem_store *store,
+                                      const struct eval_run_opts *opts,
                                       struct eval_run_report *report) {
     *report = (struct eval_run_report){};
     struct file_buffer suite_text    = {};
@@ -2236,9 +2248,20 @@ static enum spg_status eval_run_suite(const char *suite_path,
         .store         = store,
     };
 
+    /* Invocation-wide knobs (resolved once, not per case). */
+    const struct eval_run_opts  defaults = {};
+    const struct eval_run_opts *o = (opts != nullptr) ? opts : &defaults;
+    const size_t                samples = (o->samples > 0u) ? o->samples : 1u;
+    const char                 *env_api_url = getenv("SPOREGEIST_API_URL");
+    const char                 *remote_url =
+        (o->remote_url != nullptr && o->remote_url[0] != '\0') ? o->remote_url
+        : (env_api_url != nullptr && env_api_url[0] != '\0')   ? env_api_url
+                                                               : nullptr;
+    const char *api_key = getenv("SPOREGEIST_API_KEY");
+
     rc = SPG_OK;
     for (uint32_t c = spg_sexpr_first_child(nod, 0u);
-         c != SPG_SEXPR_INVALID_INDEX && report->total < EVAL_MAX_CASES;
+         c != SPG_SEXPR_INVALID_INDEX && report->ncases < EVAL_MAX_CASES;
          c = nod[c].next_sibling) {
         const uint32_t head = spg_sexpr_first_child(nod, c);
         if (nod[c].kind != SPG_SEXPR_NODE_LIST ||
@@ -2247,7 +2270,8 @@ static enum spg_status eval_run_suite(const char *suite_path,
                                     nod[head].span, "case")) {
             continue;
         }
-        char *name = report->names[report->total];
+        const size_t case_idx = report->ncases;
+        char        *name     = report->names[case_idx];
         (void)snprintf(name, sizeof report->names[0], "case");
         char script_path[CLI_PATH_MAX];
         char obs[256];
@@ -2306,44 +2330,86 @@ static enum spg_status eval_run_suite(const char *suite_path,
             .exec_stderr_cap   = sizeof sh_err,
             .context_refs      = CLI_CONTEXT_REFS,
         };
-        struct spg_eval_case_result *res = &report->results[report->total];
-
         char       model_kind[16];
-        const bool geist_case =
+        const bool has_model =
             eval_str(nod, c, suite_text.n, suite_text.data, "model", model_kind,
-                     sizeof model_kind) &&
-            strcmp(model_kind, "geist") == 0;
-        if (geist_case) {
-            /* Real-model task case: run the actual engine against the scenario
-             * (non-deterministic, needs the GGUF), then score it the same way. */
-            struct spg_model_adapter            model = {};
-            const struct spg_model_adapter_config mc = {
-                .kind       = SPG_MODEL_ADAPTER_GEIST,
-                .model_path = model_path,
-                .sampling   = {.max_seq_len = 4096u,
-                               .temperature = 0.0f,
-                               .top_p       = 1.0f,
-                               .top_k       = 0,
-                               .random_seed = run.seed},
+                     sizeof model_kind);
+        const bool geist_case  = has_model && strcmp(model_kind, "geist") == 0;
+        const bool remote_case = has_model && strcmp(model_kind, "remote") == 0;
+
+        struct spg_eval_case_result last           = {};
+        size_t                      passed_in_case = 0u;
+        size_t                      runs_in_case   = 0u;
+
+        if (geist_case || remote_case) {
+            /* Real-model case (non-deterministic): build the adapter ONCE and
+             * reuse it across the N samples — spg_agent_run resets the session
+             * each call, and rebuilding a GEIST adapter per sample would reload
+             * the GGUF. */
+            struct spg_model_adapter        model = {};
+            struct spg_model_adapter_config mc    = {
+                   .sampling = {.max_seq_len = 4096u,
+                                .temperature = 0.0f,
+                                .top_p       = 1.0f,
+                                .top_k       = 0,
+                                .random_seed = run.seed},
             };
-            if (spg_model_adapter_init(&model, &mc) != SPG_OK) {
-                rc = SPG_E_MODEL;
-                goto done;
+            if (geist_case) {
+                mc.kind       = SPG_MODEL_ADAPTER_GEIST;
+                mc.model_path = model_path;
+            } else {
+                mc.kind         = SPG_MODEL_ADAPTER_REMOTE;
+                mc.endpoint_url = remote_url; /* may be null -> handled below */
+                mc.model_name =
+                    (o->remote_model != nullptr && o->remote_model[0] != '\0')
+                        ? o->remote_model
+                        : model_path;
+                mc.api_key = api_key;
             }
-            struct spg_agent_run_inputs gin = inputs;
-            gin.model                       = &model;
-            struct spg_policy_usage      usage = {};
-            struct spg_agent_loop_result loop  = {};
-            const enum spg_status s = spg_agent_run(&gin, &rcfg, &ws, &usage,
-                                                    &loop);
-            spg_model_adapter_destroy(&model);
-            *res = (struct spg_eval_case_result){
-                .outcome = spg_eval_judge(&expect, &loop, s, observation),
-                .termination  = loop.termination,
-                .steps_taken  = loop.steps_taken,
-                .repairs_used = loop.repairs_used,
-                .status       = s,
-            };
+            const enum spg_status is =
+                (remote_case && remote_url == nullptr)
+                    ? SPG_E_INVALID_ARG /* (model "remote") but no endpoint */
+                    : spg_model_adapter_init(&model, &mc);
+            if (is != SPG_OK) {
+                if (geist_case) {
+                    rc = SPG_E_MODEL; /* a configured GGUF that won't load aborts */
+                    goto done;
+                }
+                /* Remote misconfig / default (non-REMOTE) build: one clean
+                 * failing run, no crash, no whole-suite abort. */
+                if (is == SPG_E_UNSUPPORTED) {
+                    fprintf(stderr, "eval: rebuild with `make REMOTE=1` to run "
+                                    "(model \"remote\") cases\n");
+                }
+                last = (struct spg_eval_case_result){
+                    .outcome = SPG_EVAL_FAIL_RUN_ERROR, .status = is};
+                report->total += 1u;
+                runs_in_case = 1u;
+            } else {
+                for (size_t s = 0u; s < samples; s += 1u) {
+                    struct spg_agent_run_inputs gin = inputs;
+                    gin.model                       = &model;
+                    struct spg_policy_usage      usage = {};
+                    struct spg_agent_loop_result loop  = {};
+                    const enum spg_status        rs =
+                        spg_agent_run(&gin, &rcfg, &ws, &usage, &loop);
+                    last = (struct spg_eval_case_result){
+                        .outcome =
+                            spg_eval_judge(&expect, &loop, rs, observation),
+                        .termination  = loop.termination,
+                        .steps_taken  = loop.steps_taken,
+                        .repairs_used = loop.repairs_used,
+                        .status       = rs,
+                    };
+                    if (last.outcome == SPG_EVAL_PASS) {
+                        passed_in_case += 1u;
+                        report->passed += 1u;
+                    }
+                    report->total += 1u;
+                    runs_in_case += 1u;
+                }
+                spg_model_adapter_destroy(&model);
+            }
         } else {
             if (!has_script) {
                 rc = SPG_E_FORMAT; /* a scripted case needs a script */
@@ -2357,19 +2423,31 @@ static enum spg_status eval_run_suite(const char *suite_path,
             static struct spg_fake_response script[EVAL_SCRIPT_MAX];
             const size_t script_n = split_script_lines(
                 script_text.data, script_text.n, script, EVAL_SCRIPT_MAX);
-            const enum spg_status cs = spg_eval_run_case(
-                script, script_n, gate_marker, &inputs, &rcfg, &ws, &expect,
-                res);
-            free_file_buffer(&script_text);
-            if (cs != SPG_OK) {
-                rc = cs;
-                goto done;
+            for (size_t s = 0u; s < samples; s += 1u) {
+                struct spg_eval_case_result r  = {};
+                const enum spg_status       cs = spg_eval_run_case(
+                          script, script_n, gate_marker, &inputs, &rcfg, &ws,
+                          &expect, &r);
+                if (cs != SPG_OK) {
+                    free_file_buffer(&script_text);
+                    rc = cs;
+                    goto done;
+                }
+                last = r;
+                if (r.outcome == SPG_EVAL_PASS) {
+                    passed_in_case += 1u;
+                    report->passed += 1u;
+                }
+                report->total += 1u;
+                runs_in_case += 1u;
             }
+            free_file_buffer(&script_text);
         }
-        if (res->outcome == SPG_EVAL_PASS) {
-            report->passed += 1u;
-        }
-        report->total += 1u;
+
+        report->results[case_idx]     = last;
+        report->runs[case_idx]        = runs_in_case;
+        report->case_passed[case_idx] = passed_in_case;
+        report->ncases += 1u;
     }
 
 done:
@@ -2385,21 +2463,45 @@ done:
 
 static void eval_print_report(const char *suite_path,
                               const struct eval_run_report *report) {
-    for (size_t i = 0u; i < report->total; i += 1u) {
+    for (size_t i = 0u; i < report->ncases; i += 1u) {
         const struct spg_eval_case_result *r = &report->results[i];
         printf("{\"name\":\"%s\",\"outcome\":\"%s\",\"termination\":\"%s\","
-               "\"steps\":%zu,\"repairs\":%zu}\n",
+               "\"steps\":%zu,\"repairs\":%zu",
                report->names[i], spg_eval_outcome_to_string(r->outcome),
                spg_agent_loop_termination_to_string(r->termination),
                r->steps_taken, r->repairs_used);
+        /* With --samples N>1, aggregate k-of-N; N==1 stays byte-identical. */
+        if (report->runs[i] > 1u) {
+            printf(",\"runs\":%zu,\"passed\":%zu", report->runs[i],
+                   report->case_passed[i]);
+        }
+        printf("}\n");
     }
     printf("{\"suite\":\"%s\",\"total\":%zu,\"passed\":%zu}\n", suite_path,
            report->total, report->passed);
 }
 
 static int eval_command(int argc, char **argv) {
-    const char *suite_path = nullptr;
+    const char *suite_path   = nullptr;
+    const char *remote_url   = nullptr;
+    const char *remote_model = nullptr;
+    size_t      samples      = 1u;
     for (int i = 2; i < argc; i += 1) {
+        if (strcmp(argv[i], "--remote-url") == 0 && i + 1 < argc) {
+            remote_url = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--remote-model") == 0 && i + 1 < argc) {
+            remote_model = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            if (!parse_positive_size(argv[++i], &samples)) {
+                fprintf(stderr, "eval: invalid --samples value\n");
+                return 2;
+            }
+            continue;
+        }
         if (suite_path == nullptr && argv[i][0] != '-') {
             suite_path = argv[i];
             continue;
@@ -2408,11 +2510,18 @@ static int eval_command(int argc, char **argv) {
         return 2;
     }
     if (suite_path == nullptr) {
-        fprintf(stderr, "usage: %s eval <suite.spg>\n", argv[0]);
+        fprintf(stderr,
+                "usage: %s eval <suite.spg> [--remote-url <url>] "
+                "[--remote-model <name>] [--samples <N>]\n",
+                argv[0]);
         return 2;
     }
     static struct eval_run_report report;
-    const enum spg_status status = eval_run_suite(suite_path, nullptr, &report);
+    const struct eval_run_opts    opts = {.remote_url   = remote_url,
+                                          .remote_model = remote_model,
+                                          .samples      = samples};
+    const enum spg_status status = eval_run_suite(suite_path, nullptr, &opts,
+                                                  &report);
     if (status != SPG_OK) {
         fprintf(stderr, "eval: suite run failed: %s\n",
                 spg_status_to_string(status));
@@ -2426,12 +2535,29 @@ static int eval_command(int argc, char **argv) {
  * persist each tentatively into the mind-palace, re-run, and keep it only if
  * the pass count did not drop (else revert). Emits a JSONL report. */
 static int improve_command(int argc, char **argv) {
-    const char *suite_path = nullptr;
-    const char *memory_dir = nullptr;
+    const char *suite_path   = nullptr;
+    const char *memory_dir   = nullptr;
+    const char *remote_url   = nullptr;
+    const char *remote_model = nullptr;
+    size_t      samples      = 1u;
     for (int i = 2; i < argc; i += 1) {
         if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
-            memory_dir = argv[i + 1];
-            i += 1;
+            memory_dir = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--remote-url") == 0 && i + 1 < argc) {
+            remote_url = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--remote-model") == 0 && i + 1 < argc) {
+            remote_model = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--samples") == 0 && i + 1 < argc) {
+            if (!parse_positive_size(argv[++i], &samples)) {
+                fprintf(stderr, "improve: invalid --samples value\n");
+                return 2;
+            }
             continue;
         }
         if (suite_path == nullptr && argv[i][0] != '-') {
@@ -2442,7 +2568,9 @@ static int improve_command(int argc, char **argv) {
         return 2;
     }
     if (suite_path == nullptr) {
-        fprintf(stderr, "usage: %s improve <suite.spg> [--memory-dir <d>]\n",
+        fprintf(stderr,
+                "usage: %s improve <suite.spg> [--memory-dir <d>] "
+                "[--remote-url <url>] [--remote-model <name>] [--samples <N>]\n",
                 argv[0]);
         return 2;
     }
@@ -2454,8 +2582,11 @@ static int improve_command(int argc, char **argv) {
         return 1;
     }
 
+    const struct eval_run_opts opts = {.remote_url   = remote_url,
+                                       .remote_model = remote_model,
+                                       .samples      = samples};
     static struct eval_run_report baseline;
-    if (eval_run_suite(suite_path, &store, &baseline) != SPG_OK) {
+    if (eval_run_suite(suite_path, &store, &opts, &baseline) != SPG_OK) {
         fprintf(stderr, "improve: baseline run failed\n");
         return 1;
     }
@@ -2463,7 +2594,7 @@ static int improve_command(int argc, char **argv) {
     /* Distinct candidate lessons from the failing cases. */
     struct spg_lesson candidates[EVAL_MAX_CASES];
     size_t            ncand = 0u;
-    for (size_t i = 0u; i < baseline.total; i += 1u) {
+    for (size_t i = 0u; i < baseline.ncases; i += 1u) {
         struct spg_lesson lesson;
         if (!spg_reflect_case(&baseline.results[i], &lesson)) {
             continue;
@@ -2489,7 +2620,7 @@ static int improve_command(int argc, char **argv) {
         (void)spg_mem_save(&store, lesson->slug, lesson->description,
                            lesson->body); /* tentative */
         static struct eval_run_report trial;
-        if (eval_run_suite(suite_path, &store, &trial) != SPG_OK) {
+        if (eval_run_suite(suite_path, &store, &opts, &trial) != SPG_OK) {
             fprintf(stderr, "improve: trial run failed\n");
             return 1;
         }
