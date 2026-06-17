@@ -2537,12 +2537,17 @@ static int eval_command(int argc, char **argv) {
 static int improve_command(int argc, char **argv) {
     const char *suite_path   = nullptr;
     const char *memory_dir   = nullptr;
-    const char *remote_url   = nullptr;
-    const char *remote_model = nullptr;
-    size_t      samples      = 1u;
+    const char *remote_url    = nullptr;
+    const char *remote_model  = nullptr;
+    const char *validate_path = nullptr;
+    size_t      samples       = 1u;
     for (int i = 2; i < argc; i += 1) {
         if (strcmp(argv[i], "--memory-dir") == 0 && i + 1 < argc) {
             memory_dir = argv[++i];
+            continue;
+        }
+        if (strcmp(argv[i], "--validate") == 0 && i + 1 < argc) {
+            validate_path = argv[++i];
             continue;
         }
         if (strcmp(argv[i], "--remote-url") == 0 && i + 1 < argc) {
@@ -2569,8 +2574,9 @@ static int improve_command(int argc, char **argv) {
     }
     if (suite_path == nullptr) {
         fprintf(stderr,
-                "usage: %s improve <suite.spg> [--memory-dir <d>] "
-                "[--remote-url <url>] [--remote-model <name>] [--samples <N>]\n",
+                "usage: %s improve <suite.spg> [--validate <holdout.spg>] "
+                "[--memory-dir <d>] [--remote-url <url>] [--remote-model <name>] "
+                "[--samples <N>]\n",
                 argv[0]);
         return 2;
     }
@@ -2612,33 +2618,63 @@ static int improve_command(int argc, char **argv) {
         }
     }
 
-    const size_t orig_passed = baseline.passed;
-    size_t       cur_passed  = baseline.passed;
+    /* Hold-out gate: candidate lessons are distilled from the *train* suite
+     * (above), but the keep/revert decision is measured on the *validation*
+     * suite when one is given — so a lesson is kept only if it generalises to
+     * cases it was not derived from, not merely because it fit the suite it came
+     * from. Without --validate the gate falls back to the train suite (the
+     * historical behaviour, and the output is byte-identical). */
+    const char *const gate_path =
+        validate_path != nullptr ? validate_path : suite_path;
+    size_t cur_passed = baseline.passed;
+    if (validate_path != nullptr) {
+        static struct eval_run_report gate_baseline;
+        if (eval_run_suite(validate_path, &store, &opts, &gate_baseline) !=
+            SPG_OK) {
+            fprintf(stderr, "improve: validation baseline run failed\n");
+            return 1;
+        }
+        cur_passed = gate_baseline.passed;
+    }
+    const size_t orig_passed = cur_passed;
     size_t       kept        = 0u;
     for (size_t k = 0u; k < ncand; k += 1u) {
         const struct spg_lesson *lesson = &candidates[k];
         (void)spg_mem_save(&store, lesson->slug, lesson->description,
                            lesson->body); /* tentative */
         static struct eval_run_report trial;
-        if (eval_run_suite(suite_path, &store, &opts, &trial) != SPG_OK) {
+        if (eval_run_suite(gate_path, &store, &opts, &trial) != SPG_OK) {
             fprintf(stderr, "improve: trial run failed\n");
             return 1;
         }
         const bool accepted = spg_improve_accept(cur_passed, trial.passed);
         bool       was_kept = false;
         (void)spg_improve_commit(&store, lesson, accepted, &was_kept);
-        printf("{\"lesson\":\"%s\",\"accepted\":%s,\"baseline_passed\":%zu,"
-               "\"trial_passed\":%zu}\n",
-               lesson->slug, accepted ? "true" : "false", cur_passed,
-               trial.passed);
+        if (validate_path != nullptr) {
+            printf("{\"lesson\":\"%s\",\"accepted\":%s,\"held_out_passed\":%zu,"
+                   "\"trial_passed\":%zu}\n",
+                   lesson->slug, accepted ? "true" : "false", cur_passed,
+                   trial.passed);
+        } else {
+            printf("{\"lesson\":\"%s\",\"accepted\":%s,\"baseline_passed\":%zu,"
+                   "\"trial_passed\":%zu}\n",
+                   lesson->slug, accepted ? "true" : "false", cur_passed,
+                   trial.passed);
+        }
         if (was_kept) {
             cur_passed = trial.passed;
             kept += 1u;
         }
     }
-    printf("{\"suite\":\"%s\",\"baseline_passed\":%zu,\"final_passed\":%zu,"
-           "\"lessons_kept\":%zu}\n",
-           suite_path, orig_passed, cur_passed, kept);
+    if (validate_path != nullptr) {
+        printf("{\"suite\":\"%s\",\"validate\":\"%s\",\"held_out_baseline\":%zu,"
+               "\"held_out_final\":%zu,\"lessons_kept\":%zu}\n",
+               suite_path, validate_path, orig_passed, cur_passed, kept);
+    } else {
+        printf("{\"suite\":\"%s\",\"baseline_passed\":%zu,\"final_passed\":%zu,"
+               "\"lessons_kept\":%zu}\n",
+               suite_path, orig_passed, cur_passed, kept);
+    }
     return 0;
 }
 

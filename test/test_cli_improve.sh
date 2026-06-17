@@ -32,6 +32,17 @@ printf '%s\n' "$OUT3"
 printf '%s\n' "$OUT3" | grep -q '"lesson":"lesson-rejected","accepted":true,"baseline_passed":0,"trial_passed":1'
 printf '%s\n' "$OUT3" | grep -q '"baseline_passed":0,"final_passed":1,"lessons_kept":1'
 
+# --- hold-out gate: a lesson is distilled from the TRAIN suite but kept only if
+#     it improves a separate VALIDATION suite (generalisation, not overfitting).
+#     Learn from improve_suite; judge on the held-out improve_gated, where the
+#     recalled lesson flips a gated case 0 -> 1. ---
+OUT4=$("$SPG_BIN" improve examples/eval/improve_suite.spg \
+    --validate examples/eval/improve_gated.spg --memory-dir "$T/h")
+printf '%s\n' "$OUT4"
+printf '%s\n' "$OUT4" | grep -q '"lesson":"lesson-rejected","accepted":true,"held_out_passed":0,"trial_passed":1'
+printf '%s\n' "$OUT4" | grep -q '"validate":"examples/eval/improve_gated.spg"'
+printf '%s\n' "$OUT4" | grep -q '"held_out_baseline":0,"held_out_final":1,"lessons_kept":1'
+
 # --- deterministic: two fresh runs of the failing suite agree byte-for-byte ---
 "$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/a" > "$T/a.out"
 "$SPG_BIN" improve examples/eval/improve_suite.spg --memory-dir "$T/b" > "$T/b.out"

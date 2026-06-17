@@ -132,6 +132,22 @@ $ sporegeist improve examples/eval/improve_gated.spg --memory-dir ./mem
 A recalled lesson flipped a failing case to passing (`0 → 1`) and was kept
 because it helped; a harmful lesson would have been reverted.
 
+**Hold‑out validation (`--validate <holdout.spg>`).** By default a lesson is
+distilled from a suite *and* judged on that same suite — which cannot
+distinguish a lesson that generalises from one that merely fit the cases it came
+from. Pass a held‑out suite and the keep/revert gate is measured on it instead:
+candidates are still reflected from the train suite's failures, but a lesson is
+kept only if it does **not regress the validation set** it was never derived
+from. This turns "self‑improvement" from a same‑set fit into a generalisation
+claim — and it is model‑agnostic, so it matters *more* for small/noisy models,
+where keeping a lucky lesson is the main failure mode.
+
+```
+$ sporegeist improve train.spg --validate holdout.spg --memory-dir ./mem
+{"lesson":"lesson-rejected","accepted":true,"held_out_passed":0,"trial_passed":1}
+{"suite":"train.spg","validate":"holdout.spg","held_out_baseline":0,"held_out_final":1,"lessons_kept":1}
+```
+
 ## Where sporegeist is different — and where it is not
 
 This section is deliberately critical. sporegeist makes a sharp bet: be a
