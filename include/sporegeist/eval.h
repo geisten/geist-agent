@@ -3,6 +3,8 @@
 
 #include "sporegeist/agent_run.h"
 #include "sporegeist/model_adapter.h"
+#include "sporegeist/policy.h"
+#include "sporegeist/recommendation.h"
 #include "sporegeist/status.h"
 
 #include <stdbool.h>
@@ -41,6 +43,12 @@ struct spg_eval_case_result {
     size_t                          steps_taken;
     size_t                          repairs_used;
     enum spg_status                 status; /* run status (SPG_OK unless error) */
+    /* Concrete failure signal from the final tick, so reflection can distil a
+     * lesson from what actually went wrong rather than the failure mode alone.
+     * Meaningful for the matching termination (reject_reason when rejected,
+     * deny_reason when denied); otherwise the NONE/zero value. */
+    enum spg_recommendation_reject_reason reject_reason;
+    enum spg_policy_deny_reason           deny_reason;
 };
 
 [[nodiscard]] const char *spg_eval_outcome_to_string(enum spg_eval_outcome o);

@@ -44,6 +44,63 @@ static int test_reflect_failure_modes(void) {
     return 0;
 }
 
+/* Lessons are earned: the concrete failure signal (reject/deny reason, step and
+ * repair counts) is woven into the text, not a constant template. */
+static int test_reflect_earned_content(void) {
+    struct spg_lesson lesson = {};
+
+    const struct spg_eval_case_result rejected = {
+        .outcome       = SPG_EVAL_FAIL_TERMINATION,
+        .termination   = SPG_AGENT_LOOP_REJECTED,
+        .reject_reason = SPG_RECOMMENDATION_REJECT_MISSING_FIELD,
+        .repairs_used  = 2u,
+    };
+    if (!spg_reflect_case(&rejected, &lesson) ||
+        strcmp(lesson.slug, "lesson-rejected") != 0 ||
+        strstr(lesson.description, "a required field was missing") == nullptr ||
+        strstr(lesson.body, "a required field was missing") == nullptr) {
+        return 1;
+    }
+
+    const struct spg_eval_case_result denied = {
+        .outcome     = SPG_EVAL_FAIL_TERMINATION,
+        .termination = SPG_AGENT_LOOP_DENIED,
+        .deny_reason = SPG_POLICY_DENY_DISABLED_CAPABILITY,
+    };
+    if (!spg_reflect_case(&denied, &lesson) ||
+        strcmp(lesson.slug, "lesson-denied") != 0 ||
+        strstr(lesson.body, "the capability is disabled") == nullptr) {
+        return 1;
+    }
+
+    const struct spg_eval_case_result capped = {
+        .outcome     = SPG_EVAL_FAIL_TERMINATION,
+        .termination = SPG_AGENT_LOOP_MAX_STEPS,
+        .steps_taken = 7u,
+    };
+    if (!spg_reflect_case(&capped, &lesson) ||
+        strstr(lesson.body, "7 step") == nullptr) {
+        return 1;
+    }
+
+    /* Distinct reasons in the same failure mode produce distinct lesson text
+     * (the whole point of "earned": same slug, different diagnosis). */
+    struct spg_lesson                 from_missing = {};
+    struct spg_lesson                 from_syntax  = {};
+    const struct spg_eval_case_result rejected_syntax = {
+        .outcome       = SPG_EVAL_FAIL_TERMINATION,
+        .termination   = SPG_AGENT_LOOP_REJECTED,
+        .reject_reason = SPG_RECOMMENDATION_REJECT_SYNTAX,
+    };
+    if (!spg_reflect_case(&rejected, &from_missing) ||
+        !spg_reflect_case(&rejected_syntax, &from_syntax) ||
+        strcmp(from_missing.slug, from_syntax.slug) != 0 ||
+        strcmp(from_missing.body, from_syntax.body) == 0) {
+        return 1; /* same slug, but MISSING_FIELD vs SYNTAX must read differently */
+    }
+    return 0;
+}
+
 /* A passing case yields no lesson. */
 static int test_reflect_pass_no_lesson(void) {
     const struct spg_eval_case_result result = {
@@ -128,6 +185,10 @@ static int test_commit_keep_and_revert(void) {
 int main(void) {
     if (test_reflect_failure_modes() != 0) {
         fprintf(stderr, "test_reflect_failure_modes failed\n");
+        return 1;
+    }
+    if (test_reflect_earned_content() != 0) {
+        fprintf(stderr, "test_reflect_earned_content failed\n");
         return 1;
     }
     if (test_reflect_pass_no_lesson() != 0) {

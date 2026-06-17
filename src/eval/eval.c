@@ -79,6 +79,9 @@ spg_eval_run_case(const struct spg_fake_response *script, const size_t script_n,
     result->termination  = loop.termination;
     result->steps_taken  = loop.steps_taken;
     result->repairs_used = loop.repairs_used;
+    /* Concrete signal from the final tick for reflection to learn from. */
+    result->reject_reason = loop.last.recommendation.reject_reason;
+    result->deny_reason   = loop.last.policy_gate.decision.deny_reason;
     result->outcome =
         spg_eval_judge(expect, &loop, status, workspace->observation);
     return SPG_OK;

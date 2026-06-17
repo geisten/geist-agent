@@ -99,8 +99,10 @@ policy step budget, and self‑repairing: a malformed reply is fed back as a par
 error and retried instead of aborting.
 
 **3. The self‑improvement loop** (`spg_improve`) turns evaluation failures into
-durable lessons. It runs an eval suite, distills a lesson from each failing case
-(keyed on the failure mode), persists it tentatively into the mind‑palace,
+durable lessons. It runs an eval suite and distills a lesson from each failing
+case — keyed on the failure mode, but *earned* from that run's concrete signal
+(the actual reject/deny reason and the step/repair counts, not a fixed
+template). It persists the lesson tentatively into the mind‑palace,
 re‑evaluates, and **keeps the lesson only if the pass count did not drop** —
 otherwise it reverts. The eval harness is the acceptance gate for the agent's
 own self‑modifications.
