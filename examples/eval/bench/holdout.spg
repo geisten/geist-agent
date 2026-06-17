@@ -1,0 +1,18 @@
+; Held-out suite the lessons were NOT distilled from. Each gated case stays
+; "(blocked)" until its lesson's slug appears in the recalled mind-palace index.
+;   h-control      : passes at baseline, unaffected by any lesson (control)
+;   h-gain-a/b     : blocked -> finish once "lesson-rejected" is recalled  (+2)
+;   h-harm-a/b     : meant to stay rejected; "lesson-max-steps" makes them
+;                    finish instead -> expectation fails  (-2, must be reverted)
+(eval_suite
+ (config "examples/run.spg")
+ (case (name "h-control") (script "examples/eval/sim_finish.txt") (max_steps 5)
+       (expect (termination finished)))
+ (case (name "h-gain-a") (script "examples/eval/gated.txt") (gate_marker "lesson-rejected") (max_steps 5)
+       (expect (termination finished)))
+ (case (name "h-gain-b") (script "examples/eval/gated.txt") (gate_marker "lesson-rejected") (max_steps 5)
+       (expect (termination finished)))
+ (case (name "h-harm-a") (script "examples/eval/gated.txt") (gate_marker "lesson-max-steps") (max_steps 5)
+       (expect (termination rejected)))
+ (case (name "h-harm-b") (script "examples/eval/gated.txt") (gate_marker "lesson-max-steps") (max_steps 5)
+       (expect (termination rejected))))

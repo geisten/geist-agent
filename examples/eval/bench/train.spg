@@ -1,0 +1,10 @@
+; Training suite: each case fails in a distinct mode, so the improve loop
+; distills a distinct candidate lesson (keyed on the failure mode).
+;   train-rejected -> malformed reply -> lesson-rejected   (helpful on holdout)
+;   train-maxsteps -> never finishes   -> lesson-max-steps  (harmful on holdout)
+(eval_suite
+ (config "examples/run.spg")
+ (case (name "train-rejected") (script "examples/eval/broken.txt") (max_steps 5)
+       (expect (termination finished)))
+ (case (name "train-maxsteps") (script "examples/eval/capped.txt") (max_steps 2)
+       (expect (termination finished))))

@@ -148,6 +148,38 @@ $ sporegeist improve train.spg --validate holdout.spg --memory-dir ./mem
 {"suite":"train.spg","validate":"holdout.spg","held_out_baseline":0,"held_out_final":1,"lessons_kept":1}
 ```
 
+#### Reproducible benchmark
+
+A self‑contained benchmark exercises the whole loop on deterministic scripted
+models, so the numbers are byte‑identical on every run (it is part of `make test`):
+
+```
+$ examples/eval/bench/improve_benchmark.sh
+
+=== eval-gated self-improvement benchmark =====================
+train suite     : examples/eval/bench/train.spg
+held-out suite  : examples/eval/bench/holdout.spg  (5 cases)
+---------------------------------------------------------------
+held-out pass   : 3/5  ->  5/5   (baseline -> after learning)
+lessons         : 2 proposed, 1 kept, 1 reverted
+regressions kept: 0  (invariant: final >= baseline)
+---------------------------------------------------------------
+benchmark: PASS
+```
+
+Two candidate lessons are distilled from the train suite. On the **held‑out**
+suite one generalises (`lesson-rejected`, +2) and is **kept**; the other would
+regress held‑out cases (`lesson-max-steps`, −2) and is **reverted**. Held‑out
+pass rate rises 3/5 → 5/5 with **zero regressions kept** — the property the gate
+guarantees. Because the lessons are judged on cases they were never derived
+from, this is a generalisation result, not a same‑set fit.
+
+Honest scope: the models here are scripted fakes, so this proves the
+*mechanism* (gated learning lifts a held‑out metric and never keeps a
+regression), not a capability gain on a real model. Swap in a local or remote
+model and add `--samples N` to run the identical harness under noise — each case
+then reports `k of N` and the gate compares summed pass counts.
+
 ## Where sporegeist is different — and where it is not
 
 This section is deliberately critical. sporegeist makes a sharp bet: be a
