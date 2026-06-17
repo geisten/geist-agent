@@ -111,7 +111,17 @@ Suites are s‑expressions of scored cases. A scripted case drives a determinist
 fake model and is checked against expectations (termination reason, step bounds,
 an observation substring), emitting a JSONL verdict per case — usable both in CI
 and as the measurement step of the self‑improvement loop. A `(model "geist")`
-case runs the real engine for production measurement.
+case runs the local engine; a `(model "remote")` case runs a **frontier model**
+through the remote adapter (`eval`/`improve` take `--remote-url`/`--remote-model`,
+key from `SPOREGEIST_API_KEY`) — so the *same* governed, journaled measurement
+now works against a strong model.
+
+Because a real model is non‑deterministic, `--samples N` runs each case N times
+and the per‑case verdict reports `k of N`; the self‑improvement gate compares the
+**summed** pass counts and still keeps a lesson only when the total does not drop
+(no net regression — larger N just lowers the variance). Each individual run
+stays byte‑identical‑replayable from its journal; only *which* run you get
+varies.
 
 ```
 $ sporegeist improve examples/eval/improve_gated.spg --memory-dir ./mem
