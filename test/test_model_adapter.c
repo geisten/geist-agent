@@ -175,9 +175,46 @@ static int test_remote_unsupported(void) {
     return 0;
 }
 
+/* When built with the libcurl transport, REMOTE init must create a handle and
+ * mark the adapter initialized, destroy must tear it down, and a config missing
+ * the endpoint/model is rejected. No network is touched (no generate call).
+ * Skipped in the default build, which has no transport. */
+static int test_remote_lifecycle(void) {
+#ifdef SPG_ENABLE_REMOTE
+    struct spg_model_adapter        adapter = {};
+    const struct spg_model_adapter_config config = {
+        .kind         = SPG_MODEL_ADAPTER_REMOTE,
+        .sampling     = {.top_p = 1.0f},
+        .endpoint_url = "http://127.0.0.1:9/v1/chat/completions",
+        .model_name   = "m",
+    };
+    if (spg_model_adapter_init(&adapter, &config) != SPG_OK) {
+        return 1;
+    }
+    if (!adapter.initialized || adapter.http == nullptr) {
+        spg_model_adapter_destroy(&adapter);
+        return 1;
+    }
+    spg_model_adapter_destroy(&adapter);
+    if (adapter.initialized || adapter.http != nullptr) {
+        return 1;
+    }
+    struct spg_model_adapter_config bad = config;
+    bad.endpoint_url                    = nullptr;
+    if (spg_model_adapter_init(&adapter, &bad) != SPG_E_INVALID_ARG) {
+        return 1;
+    }
+#endif
+    return 0;
+}
+
 int main(void) {
     if (test_remote_unsupported() != 0) {
         fprintf(stderr, "test_remote_unsupported failed\n");
+        return 1;
+    }
+    if (test_remote_lifecycle() != 0) {
+        fprintf(stderr, "test_remote_lifecycle failed\n");
         return 1;
     }
     if (test_fake_generate() != 0) {

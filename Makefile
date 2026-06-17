@@ -9,6 +9,14 @@ GEIST_REF  ?= v0.2.1
 
 BUILD_MODE ?= host-debug
 
+# Optional REMOTE model adapter (libcurl transport, OpenAI-compatible). Off by
+# default so the standard build needs no libcurl; enable with `make REMOTE=1`.
+REMOTE ?= 0
+ifeq ($(REMOTE),1)
+    REMOTE_DEFS := -DSPG_ENABLE_REMOTE
+    REMOTE_LIBS := -lcurl
+endif
+
 HOST_CC ?= clang
 
 AR ?= ar
@@ -56,8 +64,8 @@ endif
 
 CPPFLAGS := -Iinclude -Iinclude/sporegeist -I$(GEIST_DIR)/include -I$(GEIST_DIR) -I$(DEPS_DIR)/jsmn
 WARNINGS := -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Wstrict-prototypes
-CFLAGS := -std=c23 $(WARNINGS) $(SPG_OPT_FLAGS) $(CPPFLAGS)
-LDLIBS := $(GEIST_LINK_FLAGS) -lm -lpthread
+CFLAGS := -std=c23 $(WARNINGS) $(SPG_OPT_FLAGS) $(CPPFLAGS) $(REMOTE_DEFS)
+LDLIBS := $(GEIST_LINK_FLAGS) -lm -lpthread $(REMOTE_LIBS)
 
 
 SPG_SOURCES := \
@@ -101,6 +109,10 @@ SPG_SOURCES := \
     src/sim/risk.c \
     src/sim/sim_executor.c \
     src/sim/sim_config.c
+
+ifeq ($(REMOTE),1)
+    SPG_SOURCES += src/model/model_remote.c
+endif
 
 CLI_SOURCES := src/cli/main.c
 CHAT_SOURCES := src/chat/main.c
@@ -195,6 +207,7 @@ help:
 	@echo "  make host-debug      build ASan/UBSan host binary"
 	@echo "  make host-release    build optimized host binary"
 	@echo "  make test            build and run standalone tests"
+	@echo "  make REMOTE=1 ...     build with the libcurl remote model adapter"
 	@echo "  make sync-engine     clone deps/geist from GitHub if missing"
 	@echo "  make update-engine   checkout the pinned GEIST_REF in deps/geist"
 	@echo "  make clean           remove top-level build outputs"

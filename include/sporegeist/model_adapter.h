@@ -87,11 +87,14 @@ struct spg_model_adapter {
     size_t                          fake_index; /* next scripted reply */
     const char                     *fake_gate_marker;
 
-    /* REMOTE transport state: opaque CURL handle + borrowed config strings. */
+    /* REMOTE transport state: opaque CURL handle, borrowed config strings, and
+     * the sampling values forwarded to the chat/completions request. */
     void       *http;
     const char *endpoint_url;
     const char *model_name;
     const char *api_key;
+    float       temperature;
+    float       top_p;
 };
 
 struct spg_model_generate_request {
