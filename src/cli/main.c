@@ -75,12 +75,16 @@ static void print_run_usage(const char *argv0) {
     fprintf(stderr,
             "usage: %s run --config <run.spg> [--fake '<recommendation>'] "
             "[--ticks <n>] [--write-sim-state <build/final.spg>] "
-            "[--write-run-state <build/run-state.json>]\n"
+            "[--write-run-state <build/run-state.json>] "
+            "[--remote-url <url>] [--remote-model <name>]\n"
             "\n"
             "Runs orchestrator ticks with one mutable in-process "
             "simulator state.\n"
             "Without --fake, the model path from the run config is loaded via "
             "libgeist.\n"
+            "With --remote-url (or SPOREGEIST_API_URL) and a REMOTE=1 build, an "
+            "OpenAI-compatible\nendpoint drives the loop; the key is read from "
+            "SPOREGEIST_API_KEY.\n"
             "Shell and network recommendations stop after recommendation and "
             "policy gating.\n"
             "If requested, writes the final simulator state as a scenario "
@@ -1331,7 +1335,8 @@ done:
 
 static int run_loop(const char *run_path, const char *fake_output,
                     const size_t ticks, const char *sim_state_path,
-                    const char *run_state_path, const char *memory_dir) {
+                    const char *run_state_path, const char *memory_dir,
+                    const char *remote_url, const char *remote_model) {
     if (run_path == nullptr || ticks == 0u) {
         return 2;
     }
@@ -1429,11 +1434,30 @@ static int run_loop(const char *run_path, const char *fake_output,
     }
     journal_open = true;
 
-    const bool use_fake = fake_output != nullptr;
+    /* Adapter selection: --fake wins; else a remote endpoint (flag or
+     * SPOREGEIST_API_URL) selects the REMOTE model; else local GEIST. */
+    const bool  use_fake    = fake_output != nullptr;
+    const char *env_api_url = getenv("SPOREGEIST_API_URL");
+    const char *url =
+        (remote_url != nullptr && remote_url[0] != '\0')        ? remote_url
+        : (env_api_url != nullptr && env_api_url[0] != '\0')    ? env_api_url
+                                                                : nullptr;
+    const bool use_remote = !use_fake && url != nullptr;
+    /* For REMOTE the (model "...") value is a model name, not a file path; an
+     * explicit --remote-model overrides it. The key is env-only. */
+    const char *remote_name =
+        (remote_model != nullptr && remote_model[0] != '\0') ? remote_model
+                                                             : model_path;
+    const enum spg_model_adapter_kind kind =
+        use_fake     ? SPG_MODEL_ADAPTER_FAKE
+        : use_remote ? SPG_MODEL_ADAPTER_REMOTE
+                     : SPG_MODEL_ADAPTER_GEIST;
     const struct spg_model_adapter_config model_config = {
-        .kind            = use_fake ? SPG_MODEL_ADAPTER_FAKE
-                                    : SPG_MODEL_ADAPTER_GEIST,
-        .model_path      = use_fake ? nullptr : model_path,
+        .kind         = kind,
+        .model_path   = (kind == SPG_MODEL_ADAPTER_GEIST) ? model_path : nullptr,
+        .endpoint_url = use_remote ? url : nullptr,
+        .model_name   = use_remote ? remote_name : nullptr,
+        .api_key      = use_remote ? getenv("SPOREGEIST_API_KEY") : nullptr,
         .sampling        = {.max_seq_len = 4096u,
                             .temperature = 0.0f,
                             .top_p = 1.0f,
@@ -1446,6 +1470,10 @@ static int run_loop(const char *run_path, const char *fake_output,
     if (status != SPG_OK) {
         fprintf(stderr, "run: model init failed: %s\n",
                 spg_status_to_string(status));
+        if (use_remote && status == SPG_E_UNSUPPORTED) {
+            fprintf(stderr,
+                    "run: rebuild with `make REMOTE=1` to enable --remote-url\n");
+        }
         goto done;
     }
     model_open = true;
@@ -1640,6 +1668,8 @@ static int run_command(int argc, char **argv) {
     const char *sim_state_path = nullptr;
     const char *run_state_path = nullptr;
     const char *memory_dir     = getenv("SPOREGEIST_MEMORY_DIR");
+    const char *remote_url     = nullptr;
+    const char *remote_model   = nullptr;
     size_t ticks = 3u;
     for (int i = 2; i < argc; i += 1) {
         if ((strcmp(argv[i], "--config") == 0 ||
@@ -1678,6 +1708,16 @@ static int run_command(int argc, char **argv) {
             i += 1;
             continue;
         }
+        if (strcmp(argv[i], "--remote-url") == 0 && i + 1 < argc) {
+            remote_url = argv[i + 1];
+            i += 1;
+            continue;
+        }
+        if (strcmp(argv[i], "--remote-model") == 0 && i + 1 < argc) {
+            remote_model = argv[i + 1];
+            i += 1;
+            continue;
+        }
         fprintf(stderr, "run: unknown or incomplete argument: %s\n", argv[i]);
         return 2;
     }
@@ -1685,7 +1725,7 @@ static int run_command(int argc, char **argv) {
         return 2;
     }
     return run_loop(run_path, fake_output, ticks, sim_state_path,
-                    run_state_path, memory_dir);
+                    run_state_path, memory_dir, remote_url, remote_model);
 }
 
 #define AGENT_MAX_SCRIPT   64u
