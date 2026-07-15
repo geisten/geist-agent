@@ -1,8 +1,8 @@
-#include "sporegeist/model_remote.h"
+#include "geist-agent/model_remote.h"
 
 #ifdef SPG_ENABLE_REMOTE
 
-#include "sporegeist/model_remote_codec.h"
+#include "geist-agent/model_remote_codec.h"
 
 #include <curl/curl.h>
 #include <stdio.h>

@@ -1,4 +1,4 @@
-#include "sporegeist/schema.h"
+#include "geist-agent/schema.h"
 
 #include <string.h>
 

@@ -1,4 +1,4 @@
-#include "sporegeist/run_config.h"
+#include "geist-agent/run_config.h"
 
 #include <stdio.h>
 #include <string.h>

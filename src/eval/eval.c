@@ -1,4 +1,4 @@
-#include "sporegeist/eval.h"
+#include "geist-agent/eval.h"
 
 #include <string.h>
 

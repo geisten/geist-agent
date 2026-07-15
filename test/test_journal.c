@@ -1,10 +1,10 @@
-#include "sporegeist/journal.h"
+#include "geist-agent/journal.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
-static const char *journal_path = "/tmp/sporegeist_test_journal.sgj";
+static const char *journal_path = "/tmp/geist-agent_test_journal.sgj";
 
 static int write_sample_journal(void) {
     struct spg_journal_writer writer = {};

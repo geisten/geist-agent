@@ -1,7 +1,7 @@
-#include "sporegeist/improve.h"
+#include "geist-agent/improve.h"
 
-#include "sporegeist/policy.h"
-#include "sporegeist/recommendation.h"
+#include "geist-agent/policy.h"
+#include "geist-agent/recommendation.h"
 
 #include <stdio.h>
 #include <string.h>

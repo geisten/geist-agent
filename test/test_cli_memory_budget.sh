@@ -4,7 +4,7 @@
 # denied by the global budget; consumed.memory_actions reflects the one allowed.
 set -eu
 
-SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/geist-agent}
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 

@@ -1,4 +1,4 @@
-#include "sporegeist/chat_template.h"
+#include "geist-agent/chat_template.h"
 
 #include <string.h>
 

@@ -1,4 +1,4 @@
-#include "sporegeist/status.h"
+#include "geist-agent/status.h"
 
 const char *spg_status_to_string(const enum spg_status status) {
     switch (status) {

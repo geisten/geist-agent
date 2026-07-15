@@ -3,16 +3,16 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/exec_command.h"
+#include "geist-agent/exec_command.h"
 
-#include "sporegeist/cmd_executor.h"
-#include "sporegeist/cmd_registry.h"
-#include "sporegeist/executor_boundary.h"
-#include "sporegeist/host_probe.h"
-#include "sporegeist/policy.h"
-#include "sporegeist/recommendation.h"
-#include "sporegeist/sexpr.h"
-#include "sporegeist/status.h"
+#include "geist-agent/cmd_executor.h"
+#include "geist-agent/cmd_registry.h"
+#include "geist-agent/executor_boundary.h"
+#include "geist-agent/host_probe.h"
+#include "geist-agent/policy.h"
+#include "geist-agent/recommendation.h"
+#include "geist-agent/sexpr.h"
+#include "geist-agent/status.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -83,7 +83,7 @@ static void render_host(struct spg_sexpr_writer *w,
 int spg_exec_command(const int argc, char **argv) {
     if (argc < 1 || argv == nullptr || argv[0] == nullptr ||
         argv[0][0] == '\0') {
-        fprintf(stderr, "usage: sporegeist exec <command> [args...]\n");
+        fprintf(stderr, "usage: geist-agent exec <command> [args...]\n");
         return 2;
     }
 

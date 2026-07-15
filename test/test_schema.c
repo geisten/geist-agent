@@ -1,5 +1,5 @@
-#include "sporegeist/schema.h"
-#include "sporegeist/sexpr.h"
+#include "geist-agent/schema.h"
+#include "geist-agent/sexpr.h"
 
 #include <stdio.h>
 #include <string.h>

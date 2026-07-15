@@ -1,4 +1,4 @@
-#include "sporegeist/model_adapter.h"
+#include "geist-agent/model_adapter.h"
 
 #include <stdio.h>
 #include <string.h>

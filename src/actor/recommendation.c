@@ -1,4 +1,4 @@
-#include "sporegeist/recommendation.h"
+#include "geist-agent/recommendation.h"
 
 #include <string.h>
 

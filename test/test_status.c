@@ -1,5 +1,5 @@
-#include "sporegeist/allocator.h"
-#include "sporegeist/status.h"
+#include "geist-agent/allocator.h"
+#include "geist-agent/status.h"
 
 #include <stdalign.h>
 #include <stdint.h>

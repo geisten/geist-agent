@@ -1,7 +1,7 @@
-#include "sporegeist/shell_executor.h"
+#include "geist-agent/shell_executor.h"
 
-#include "sporegeist/cmd_executor.h"
-#include "sporegeist/sexpr.h"
+#include "geist-agent/cmd_executor.h"
+#include "geist-agent/sexpr.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "sporegeist/hash.h"
+#include "geist-agent/hash.h"
 
 #include <stdbool.h>
 #include <string.h>

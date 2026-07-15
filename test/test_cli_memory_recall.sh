@@ -3,7 +3,7 @@
 # context) and memory_delete (removes the file), through the run pipeline.
 set -eu
 
-SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/geist-agent}
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 

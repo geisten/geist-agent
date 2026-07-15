@@ -3,7 +3,7 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/cmd_executor.h"
+#include "geist-agent/cmd_executor.h"
 
 #include <errno.h>
 #include <fcntl.h>

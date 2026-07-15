@@ -3,11 +3,11 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/eval.h"
+#include "geist-agent/eval.h"
 
-#include "sporegeist/policy_config.h"
-#include "sporegeist/run_config.h"
-#include "sporegeist/sim_config.h"
+#include "geist-agent/policy_config.h"
+#include "geist-agent/run_config.h"
+#include "geist-agent/sim_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

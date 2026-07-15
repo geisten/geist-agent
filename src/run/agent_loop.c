@@ -1,4 +1,4 @@
-#include "sporegeist/agent_loop.h"
+#include "geist-agent/agent_loop.h"
 
 #include <stdio.h>
 

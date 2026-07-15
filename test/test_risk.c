@@ -1,5 +1,5 @@
-#include "sporegeist/risk.h"
-#include "sporegeist/sim_config.h"
+#include "geist-agent/risk.h"
+#include "geist-agent/sim_config.h"
 
 #include <stdio.h>
 #include <string.h>

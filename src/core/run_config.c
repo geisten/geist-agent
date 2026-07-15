@@ -1,6 +1,6 @@
-#include "sporegeist/run_config.h"
+#include "geist-agent/run_config.h"
 
-#include "sporegeist/schema.h"
+#include "geist-agent/schema.h"
 
 #include <stdbool.h>
 #include <stddef.h>

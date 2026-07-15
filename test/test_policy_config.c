@@ -1,4 +1,4 @@
-#include "sporegeist/policy_config.h"
+#include "geist-agent/policy_config.h"
 
 #include <stdio.h>
 #include <string.h>

@@ -1,4 +1,4 @@
-#include "sporegeist/host_probe.h"
+#include "geist-agent/host_probe.h"
 
 #include <stdio.h>
 #include <string.h>

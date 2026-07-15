@@ -1,5 +1,5 @@
-#include "sporegeist/hmac.h"
-#include "sporegeist/journal.h"
+#include "geist-agent/hmac.h"
+#include "geist-agent/journal.h"
 
 #include <stdio.h>
 #include <string.h>

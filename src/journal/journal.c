@@ -1,6 +1,6 @@
-#include "sporegeist/journal.h"
+#include "geist-agent/journal.h"
 
-#include "sporegeist/hash.h"
+#include "geist-agent/hash.h"
 
 #include <errno.h>
 #include <stdbool.h>

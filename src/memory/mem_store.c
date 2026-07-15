@@ -3,7 +3,7 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/mem_store.h"
+#include "geist-agent/mem_store.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -20,7 +20,7 @@ const char *spg_mem_resolve_dir(const char *flag) {
     if (flag != nullptr && flag[0] != '\0') {
         return flag;
     }
-    const char *env = getenv("SPOREGEIST_MEMORY_DIR");
+    const char *env = getenv("GEIST_AGENT_MEMORY_DIR");
     if (env != nullptr && env[0] != '\0') {
         return env;
     }

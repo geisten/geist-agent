@@ -1,6 +1,6 @@
-#include "sporegeist/policy_config.h"
+#include "geist-agent/policy_config.h"
 
-#include "sporegeist/schema.h"
+#include "geist-agent/schema.h"
 
 #include <stdbool.h>
 #include <stdint.h>

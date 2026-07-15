@@ -3,7 +3,7 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/mem_store.h"
+#include "geist-agent/mem_store.h"
 
 #include <stdio.h>
 #include <stdlib.h>

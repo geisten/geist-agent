@@ -3,7 +3,7 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/host_probe.h"
+#include "geist-agent/host_probe.h"
 
 #include <string.h>
 #include <sys/utsname.h>

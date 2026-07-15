@@ -1,4 +1,4 @@
-#include "sporegeist/cmd_registry.h"
+#include "geist-agent/cmd_registry.h"
 
 #include <stdio.h>
 #include <string.h>

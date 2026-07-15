@@ -1,8 +1,8 @@
-#include "sporegeist/chat_tools.h"
+#include "geist-agent/chat_tools.h"
 
-#include "sporegeist/mem_executor.h"
-#include "sporegeist/sexpr.h"
-#include "sporegeist/shell_executor.h"
+#include "geist-agent/mem_executor.h"
+#include "geist-agent/sexpr.h"
+#include "geist-agent/shell_executor.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -62,7 +62,7 @@ static void run_exec(size_t input_n, const char *input,
                      const size_t out_cap) {
     if (!allow_exec) {
         (void)snprintf(out, out_cap,
-                       "error: exec is disabled (start sporegeist-chat with "
+                       "error: exec is disabled (start geist-agent-chat with "
                        "--allow-exec)");
         return;
     }

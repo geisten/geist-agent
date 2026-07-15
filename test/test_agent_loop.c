@@ -3,14 +3,14 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/agent_loop.h"
+#include "geist-agent/agent_loop.h"
 
-#include "sporegeist/graph.h"
-#include "sporegeist/mem_store.h"
-#include "sporegeist/memory.h"
-#include "sporegeist/model_adapter.h"
-#include "sporegeist/policy_config.h"
-#include "sporegeist/sim_config.h"
+#include "geist-agent/graph.h"
+#include "geist-agent/mem_store.h"
+#include "geist-agent/memory.h"
+#include "geist-agent/model_adapter.h"
+#include "geist-agent/policy_config.h"
+#include "geist-agent/sim_config.h"
 
 #include <stdio.h>
 #include <stdlib.h>

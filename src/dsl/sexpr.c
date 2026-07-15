@@ -1,4 +1,4 @@
-#include "sporegeist/sexpr.h"
+#include "geist-agent/sexpr.h"
 
 #include <stdbool.h>
 #include <string.h>

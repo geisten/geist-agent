@@ -1,6 +1,6 @@
-#include "sporegeist/mem_executor.h"
+#include "geist-agent/mem_executor.h"
 
-#include "sporegeist/sexpr.h"
+#include "geist-agent/sexpr.h"
 
 #include <string.h>
 

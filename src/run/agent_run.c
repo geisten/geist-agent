@@ -1,8 +1,8 @@
-#include "sporegeist/agent_run.h"
+#include "geist-agent/agent_run.h"
 
-#include "sporegeist/graph.h"
-#include "sporegeist/memory.h"
-#include "sporegeist/orchestrator.h"
+#include "geist-agent/graph.h"
+#include "geist-agent/memory.h"
+#include "geist-agent/orchestrator.h"
 
 static bool workspace_valid(const struct spg_agent_run_workspace *w) {
     return w != nullptr && w->context != nullptr && w->model_output != nullptr &&

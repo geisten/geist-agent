@@ -1,4 +1,4 @@
-#include "sporegeist/graph.h"
+#include "geist-agent/graph.h"
 
 #include <math.h>
 #include <string.h>

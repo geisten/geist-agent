@@ -3,7 +3,7 @@
 # inputs and on malformed input (exit code + summary).
 set -eu
 
-SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/geist-agent}
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 

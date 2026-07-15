@@ -1,4 +1,4 @@
-#include "sporegeist/shell_executor.h"
+#include "geist-agent/shell_executor.h"
 
 #include <stdio.h>
 #include <string.h>

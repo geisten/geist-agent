@@ -4,7 +4,7 @@
 # capability denies it (nothing written).
 set -eu
 
-SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/geist-agent}
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
 

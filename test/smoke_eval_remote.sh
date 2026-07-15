@@ -9,7 +9,7 @@
 # cleanly when absent.
 set -eu
 
-SPG_BIN=${SPG_BIN:-build/host-debug/bin/sporegeist}
+SPG_BIN=${SPG_BIN:-build/host-debug/bin/geist-agent}
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "smoke_eval_remote: SKIP (no python3)"

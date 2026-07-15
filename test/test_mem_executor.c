@@ -3,8 +3,8 @@
 #    define _DARWIN_C_SOURCE 1
 #endif
 
-#include "sporegeist/mem_executor.h"
-#include "sporegeist/recommendation.h"
+#include "geist-agent/mem_executor.h"
+#include "geist-agent/recommendation.h"
 
 #include <stdio.h>
 #include <stdlib.h>
