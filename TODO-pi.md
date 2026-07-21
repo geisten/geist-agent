@@ -11,3 +11,13 @@ und Env-Variablen heißen jetzt `geist-agent`/`GEIST_AGENT_*`.
 - [ ] Neu bauen: `make clean && make && make test`
 - [ ] Alte Binaries/Symlinks entfernen: `which sporegeist sporegeist-chat`
 - [ ] Eigene Skripte/Cron-Jobs prüfen: `grep -r sporegeist ~/bin crontab -l`
+
+## geist-wissen (ehem. geistwissen)
+
+Repo und Binary wurden in `geist-wissen` umbenannt (Commit 00a13c2).
+
+- [ ] Remote-URL aktualisieren: `git remote set-url origin https://github.com/geisten/geist-wissen.git`
+- [ ] `git pull`
+- [ ] Neu bauen: `make GEIST_DIR=<pfad-zum-geistlib-checkout>`
+- [ ] Altes Binary/Symlinks entfernen: `which geistwissen`
+- [ ] Eigene Skripte/Cron-Jobs prüfen: `grep -r geistwissen ~/bin; crontab -l | grep geistwissen`
